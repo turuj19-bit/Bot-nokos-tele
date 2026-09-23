@@ -20,6 +20,8 @@
 require('dotenv').config();
 const { Bot, InlineKeyboard } = require('grammy');
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
 
 /* ============================ KONFIGURASI ============================ */
 const { BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY } = process.env;
@@ -44,25 +46,111 @@ const SERVERS = {
   ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga hemat' },
   premium: { label: '👑 Premium', name: 'Premium', desc: 'Kualitas OTP tinggi' },
   khusus:  { label: '⭐ Khusus',  name: 'Khusus',  desc: 'Pilihan produk paling lengkap' },
-  wa_luar: { label: '📲 WhatsApp Luar Negeri', name: 'WhatsApp Luar Negeri', desc: 'Khusus WhatsApp nomor luar negeri' },
 };
 const SERVERS_ID = ['ekonomi', 'premium', 'khusus'];              // menu Nomor Indonesia
-const SERVERS_EX = ['ekonomi', 'premium', 'khusus', 'wa_luar'];   // menu Nomor Luar Negeri
+const SERVERS_EX = ['ekonomi', 'premium', 'khusus'];              // menu Nomor Luar Negeri
 
-// Daftar negara [kode API, bendera, nama]. Mau tambah/kurangi negara? Edit di sini saja.
-const COUNTRIES = [
-  ['my', '🇲🇾', 'Malaysia'], ['sg', '🇸🇬', 'Singapura'], ['us', '🇺🇸', 'Amerika Serikat'], ['uk', '🇬🇧', 'Inggris'],
-  ['th', '🇹🇭', 'Thailand'], ['vn', '🇻🇳', 'Vietnam'], ['ph', '🇵🇭', 'Filipina'], ['in', '🇮🇳', 'India'],
-  ['kh', '🇰🇭', 'Kamboja'], ['mm', '🇲🇲', 'Myanmar'], ['hk', '🇭🇰', 'Hong Kong'], ['cn', '🇨🇳', 'China'],
-  ['jp', '🇯🇵', 'Jepang'], ['kr', '🇰🇷', 'Korea Selatan'], ['au', '🇦🇺', 'Australia'], ['ca', '🇨🇦', 'Kanada'],
-  ['ru', '🇷🇺', 'Rusia'], ['ua', '🇺🇦', 'Ukraina'], ['tr', '🇹🇷', 'Turki'], ['sa', '🇸🇦', 'Arab Saudi'],
-  ['ae', '🇦🇪', 'Uni Emirat Arab'], ['eg', '🇪🇬', 'Mesir'], ['ng', '🇳🇬', 'Nigeria'], ['ke', '🇰🇪', 'Kenya'],
-  ['pk', '🇵🇰', 'Pakistan'], ['bd', '🇧🇩', 'Bangladesh'], ['br', '🇧🇷', 'Brasil'], ['mx', '🇲🇽', 'Meksiko'],
-  ['de', '🇩🇪', 'Jerman'], ['fr', '🇫🇷', 'Prancis'], ['es', '🇪🇸', 'Spanyol'], ['it', '🇮🇹', 'Italia'],
-  ['nl', '🇳🇱', 'Belanda'], ['pl', '🇵🇱', 'Polandia'],
-];
-const countryInfo = (code) =>
-  code && code !== 'id' ? (COUNTRIES.find((x) => x[0] === code) || [code, '🌍', String(code).toUpperCase()]) : null;
+/* ------------------------------------------------------------------
+ *  DAFTAR NEGARA (otomatis)
+ *  Bot mengecek sendiri negara yang punya stok di tiap server lewat API
+ *  dibanana.id (hanya baca harga, tidak beli / potong saldo). Hasilnya
+ *  disimpan di negara.json dan diperbarui otomatis tiap 24 jam.
+ *  Admin bisa paksa perbarui dengan perintah /updatenegara.
+ *  Sebelum pengecekan pertama selesai, daftar bawaan di bawah dipakai.
+ * ------------------------------------------------------------------ */
+const FALLBACK_CODES = ['my', 'sg', 'us', 'uk', 'th', 'vn', 'ph', 'in', 'kh', 'mm', 'hk', 'cn', 'jp', 'kr', 'au', 'ca',
+  'ru', 'ua', 'tr', 'sa', 'ae', 'eg', 'ng', 'ke', 'pk', 'bd', 'br', 'mx', 'de', 'fr', 'es', 'it', 'nl', 'pl'];
+const NEGARA_FILE = path.join(__dirname, 'negara.json');
+const dnId = new Intl.DisplayNames(['id'], { type: 'region', fallback: 'none' });
+const flagOf = (cc) => String.fromCodePoint(...[...cc].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+function countryInfo(code) {           // -> [kode, bendera, nama] atau null untuk Indonesia
+  if (!code || code === 'id') return null;
+  let cc = String(code).toUpperCase();
+  if (cc === 'UK') cc = 'GB';
+  let n; try { n = dnId.of(cc); } catch { n = undefined; }
+  return [code, flagOf(cc), n && n !== cc ? n : cc];
+}
+let negaraDb = {};                     // { at, ekonomi:[kode], premium:[kode], khusus:[kode] }
+try {
+  const j = JSON.parse(fs.readFileSync(NEGARA_FILE, 'utf8'));
+  if (j && !Array.isArray(j)) negaraDb = j;
+} catch { /* belum ada */ }
+function countryEntries(server) {
+  const codes = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
+  return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
+}
+
+const NON_NEGARA = new Set(['ID', 'EU', 'UN', 'ZZ', 'QO', 'XA', 'XB', 'EZ', 'AC', 'CP', 'DG', 'EA', 'IC', 'TA']);
+const CAND = [];
+for (let a = 65; a <= 90; a++) {
+  for (let b = 65; b <= 90; b++) {
+    const c = String.fromCharCode(a, b);
+    let n; try { n = dnId.of(c); } catch { n = undefined; }
+    if (n && n !== c && !NON_NEGARA.has(c)) CAND.push(c);
+  }
+}
+
+let negaraRunning = false;
+async function probeServices(server) {   // kode layanan WhatsApp & Telegram di server itu
+  try {
+    const list = await getServices(server);
+    const pick = (re) => list.find((x) => re.test(String(x.name)));
+    const codes = [pick(/whatsapp/i), pick(/telegram/i)].filter(Boolean).map((x) => String(x.code));
+    if (codes.length) return codes;
+  } catch { /* pakai bawaan */ }
+  return ['wa', 'tg'];
+}
+async function hasStock(server, code, svcs, stat) {
+  for (const svc of svcs) {
+    let r;
+    for (let i = 0; i < 3; i++) {
+      r = await bn('/prices', { query: { server, service: svc, country: code.toLowerCase() } });
+      if (r.error === 'NETWORK' || r.error === 'BAD_RESPONSE') { await sleep(1500); continue; }
+      break;
+    }
+    if (r?.error === 'INVALID_API_KEY') throw new Error('INVALID_API_KEY');
+    if (r && r.error !== 'NETWORK' && r.error !== 'BAD_RESPONSE') stat.answered++;
+    if (r?.ok && (r.providers || []).some((p) => p.stock > 0)) return true;
+    await sleep(200);
+  }
+  return false;
+}
+async function refreshNegara(force = false) {
+  if (negaraRunning) return false;
+  if (!force && negaraDb.at && Date.now() - negaraDb.at < 24 * 3600 * 1000) return false;
+  negaraRunning = true;
+  console.log('🌍 Memperbarui daftar negara dari dibanana.id...');
+  try {
+    for (const server of SERVERS_EX) {
+      const svcs = await probeServices(server);
+      const stat = { answered: 0 };
+      const found = [];
+      let idx = 0;
+      const worker = async () => {
+        while (idx < CAND.length) {
+          const code = CAND[idx++];
+          if (await hasStock(server, code, svcs, stat)) found.push(code.toLowerCase());
+          await sleep(250);
+        }
+      };
+      await Promise.all(Array.from({ length: 3 }, worker));
+      let list = found;
+      if (list.includes('gb') && list.includes('uk')) list = list.filter((c) => c !== 'uk');
+      if (stat.answered < 50) { console.error(`   ${server}: API jarang menjawab, daftar lama dipertahankan`); continue; }
+      negaraDb[server] = list.sort();
+      fs.writeFileSync(NEGARA_FILE, JSON.stringify(negaraDb));
+      console.log(`   ${server}: ${list.length} negara`);
+    }
+    negaraDb.at = Date.now();
+    fs.writeFileSync(NEGARA_FILE, JSON.stringify(negaraDb));
+    return true;
+  } catch (e) {
+    console.error('refreshNegara gagal:', e.message);
+    return false;
+  } finally {
+    negaraRunning = false;
+  }
+}
 
 const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const bot = new Bot(BOT_TOKEN);
@@ -205,9 +293,10 @@ const homeBtn = () => new InlineKeyboard().text('🏠 Menu Utama', 'home');
 
 function mainKb() {
   return new InlineKeyboard()
-    .text('🛒 Buat Order', 'ord').text('💰 Deposit', 'dep').row()
-    .text('📜 Riwayat Order', 'hist:0').text('ℹ️ Bantuan', 'help').row()
-    .url('📢 Channel Resmi', CHANNEL_URL).url('💬 Hubungi CS', CS_URL);
+    .text('🛒 Buat Order', 'ord').row()
+    .text('💰 Deposit', 'dep').text('📜 Riwayat Order', 'hist:0').row()
+    .text('ℹ️ Bantuan', 'help').url('💬 Hubungi CS', CS_URL).row()
+    .url('📢 Channel Resmi', CHANNEL_URL);
 }
 
 async function dashboardText(u) {
@@ -272,7 +361,6 @@ bot.command('start', async (ctx) => {
   sessions.delete(ctx.from.id);
   const prev = lastMenu.get(ctx.from.id);
   if (prev) ctx.api.deleteMessage(ctx.chat.id, prev).catch(() => {});
-  ctx.deleteMessage().catch(() => {});
   const m = await ctx.reply(await dashboardText(ctx.user), {
     parse_mode: 'HTML', reply_markup: mainKb(), link_preview_options: { is_disabled: true },
   });
@@ -321,12 +409,19 @@ bot.callbackQuery('help', async (ctx) => {
 
 /* ============================== LAYANAN ============================== */
 const svcCache = {};
+// Layanan populer selalu di halaman 1 (urutan sesuai daftar ini), sisanya mengikuti urutan API.
+const PRIORITAS = ['whatsapp', 'telegram', 'facebook', 'instagram', 'google', 'tiktok', 'twitter', 'shopee', 'dana', 'ovo', 'gojek', 'tokopedia']
+  .map((k) => new RegExp(`\\b${k}\\b`, 'i'));
+function sortPrioritas(list) {
+  const rank = (sv) => { const i = PRIORITAS.findIndex((re) => re.test(String(sv.name))); return i === -1 ? 999 : i; };
+  return list.map((sv, i) => [sv, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map((x) => x[0]);
+}
 async function getServices(server) {
   const c = svcCache[server];
   if (c && Date.now() - c.at < 10 * 60000) return c.data;
   const r = await bn('/services', { query: { server } });
   if (!r.ok) { if (c) return c.data; throw new Error(r.error || 'services'); }
-  svcCache[server] = { at: Date.now(), data: r.services || [] };
+  svcCache[server] = { at: Date.now(), data: sortPrioritas(r.services || []) };
   return svcCache[server].data;
 }
 
@@ -364,17 +459,16 @@ bot.callbackQuery('ord', async (ctx) => {
   ].join('\n'), kb);
 });
 
-function pickerView(country) {
-  const c = countryInfo(country);
-  const list = c ? SERVERS_EX : SERVERS_ID;
-  const lines = ['🛒 <b>Buat Order</b>', LINE, c ? `🌍 Negara : ${c[1]} <b>${esc(c[2])}</b>` : '🇮🇩 <b>Nomor Indonesia</b>', '', 'Pilih server sesuai kebutuhanmu:', ''];
+function pickerView(ex) {
+  const list = ex ? SERVERS_EX : SERVERS_ID;
+  const lines = ['🛒 <b>Buat Order</b>', LINE, ex ? '🌍 <b>Nomor Luar Negeri</b>' : '🇮🇩 <b>Nomor Indonesia</b>', '', 'Pilih server sesuai kebutuhanmu:', ''];
   const kb = new InlineKeyboard();
   for (const code of list) {
     const sv = SERVERS[code];
     lines.push(sv.label.replace(/^(\S+) (.+)$/, '$1 <b>$2</b>'), `└ ${sv.desc}`, '');
-    kb.text(sv.label, `srv:${code}`).row();
+    kb.text(sv.label, ex ? `exs:${code}` : `srv:${code}`).row();
   }
-  kb.text('⬅️ Kembali', c ? 'ctp:0' : 'ord');
+  kb.text('⬅️ Kembali', 'ord');
   lines.push(LINE);
   return { text: lines.join('\n'), kb };
 }
@@ -382,34 +476,77 @@ function pickerView(country) {
 bot.callbackQuery('reg:id', async (ctx) => {
   await ctx.answerCallbackQuery();
   const s = S(ctx.from.id);
-  s.country = 'id'; s.filter = null; s.search = null;
-  const v = pickerView('id');
+  s.country = 'id'; s.filter = null; s.search = null; s.searchCountry = false;
+  const v = pickerView(false);
   await render(ctx, v.text, v.kb);
 });
 
-async function showCountries(ctx, page) {
-  const pg = paginate(COUNTRIES, page, PER_PAGE);
-  const kb = new InlineKeyboard();
+bot.callbackQuery('reg:ex', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const s = S(ctx.from.id);
+  s.exServer = null; s.cfilter = null; s.filter = null; s.search = null; s.searchCountry = false;
+  const v = pickerView(true);
+  await render(ctx, v.text, v.kb);
+});
+
+async function showCountries(chatId, msgId, uid, page) {
+  const s = S(uid);
+  const server = s.exServer;
+  if (!server) { const v = pickerView(true); return edit(chatId, msgId, v.text, v.kb); }
+  const base = countryEntries(server);
+  const head = `${SERVERS[server].label.split(' ')[0]} <b>Server ${SERVERS[server].name}</b>`;
+  if (!base.length) {
+    return edit(chatId, msgId, `🌍 <b>Nomor Luar Negeri</b>\n${head}\n${LINE}\nBelum ada negara yang tersedia di server ini. Coba server lain.`,
+      new InlineKeyboard().text('⬅️ Kembali', 'reg:ex'));
+  }
+  const all = s.cfilter || base;
+  const pg = paginate(all, page, PER_PAGE);
+  const kb = new InlineKeyboard().text('🔍 Cari Negara', 'ctq').row();
   pg.items.forEach((c, i) => {
-    kb.text(`${c[1]} ${c[2]}`, `cty:${c[0]}`);
+    kb.text(clip(`${c[1]} ${c[2]}`, 24), `cty:${c[0]}`);
     if (i % 2 === 1) kb.row();
   });
   if (pg.items.length % 2 === 1) kb.row();
+  if (!pg.items.length) kb.text('Negara tidak ditemukan', 'noop').row();
   navRow(kb, pg.page, pg.total, 'ctp');
-  kb.text('⬅️ Kembali', 'ord');
-  await render(ctx, ['🌍 <b>Nomor Luar Negeri</b>', LINE, `Pilih negara: (${pg.page + 1}/${pg.total})`].join('\n'), kb);
+  kb.text('⬅️ Kembali', 'reg:ex');
+  const judul = s.cfilter ? `🔍 Hasil: <i>${esc(s.cfilterQ)}</i>` : 'Pilih negara:';
+  const info = negaraRunning && !Array.isArray(negaraDb[server]) ? '\n<i>ℹ️ Daftar negara sedang diperbarui.</i>' : '';
+  await edit(chatId, msgId, [`🌍 <b>Nomor Luar Negeri</b>`, head, LINE, `${judul} (${pg.page + 1}/${pg.total})${info}`].join('\n'), kb);
 }
-bot.callbackQuery('reg:ex', async (ctx) => { await ctx.answerCallbackQuery(); await showCountries(ctx, 0); });
-bot.callbackQuery(/^ctp:(\d+)$/, async (ctx) => { await ctx.answerCallbackQuery(); await showCountries(ctx, Number(ctx.match[1])); });
+
+bot.callbackQuery(/^exs:(\w+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  if (!SERVERS_EX.includes(ctx.match[1])) return;
+  const s = S(ctx.from.id);
+  s.exServer = ctx.match[1]; s.cfilter = null; s.filter = null; s.search = null; s.searchCountry = false;
+  await showCountries(ctx.chat.id, ctx.callbackQuery.message.message_id, ctx.from.id, 0);
+});
+bot.callbackQuery(/^ctp:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await showCountries(ctx.chat.id, ctx.callbackQuery.message.message_id, ctx.from.id, Number(ctx.match[1]));
+});
+bot.callbackQuery('ctq', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const s = S(ctx.from.id);
+  s.searchCountry = true; s.search = null;
+  s.chatId = ctx.chat.id; s.msgId = ctx.callbackQuery.message.message_id;
+  await render(ctx, '🔍 <b>Cari Negara</b>\n\nKetik nama negara yang kamu cari, contoh: <code>malaysia</code>',
+    new InlineKeyboard().text('⬅️ Batal', 'ctp:0'));
+});
 
 bot.callbackQuery(/^cty:(\w+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
-  if (!COUNTRIES.some((c) => c[0] === ctx.match[1])) return;
   const s = S(ctx.from.id);
-  s.country = ctx.match[1]; s.filter = null; s.search = null;
-  const v = pickerView(s.country);
-  await render(ctx, v.text, v.kb);
+  const chatId = ctx.chat.id, msgId = ctx.callbackQuery.message.message_id;
+  if (!s.exServer) { const v = pickerView(true); return edit(chatId, msgId, v.text, v.kb); }
+  s.country = ctx.match[1]; s.filter = null; s.search = null; s.searchCountry = false;
+  await showServices(chatId, msgId, ctx.from.id, s.exServer, 0);
 });
+
+const isEx = (s) => !!s.country && s.country !== 'id';
+const svReopen = (s, server) => (isEx(s) ? `cty:${s.country}` : `srv:${server}`);   // buka ulang daftar layanan
+const svUp = (s) => (isEx(s) ? 'ctp:0' : 'reg:id');                                  // naik satu level
 
 async function showServices(chatId, msgId, uid, server, page) {
   const s = S(uid);
@@ -418,7 +555,7 @@ async function showServices(chatId, msgId, uid, server, page) {
     all = s.filter && s.filterServer === server ? s.filter : await getServices(server);
   } catch (e) {
     return edit(chatId, msgId, `⚠️ Gagal memuat daftar layanan.\n${errText({ error: e.message })}`,
-      new InlineKeyboard().text('🔄 Coba Lagi', `srv:${server}`).row().text('⬅️ Kembali', s.country && s.country !== 'id' ? `cty:${s.country}` : 'reg:id'));
+      new InlineKeyboard().text('🔄 Coba Lagi', svReopen(s, server)).row().text('⬅️ Kembali', svUp(s)));
   }
   const u = await getUser(uid);
   const pg = paginate(all, page, PER_PAGE);
@@ -430,7 +567,7 @@ async function showServices(chatId, msgId, uid, server, page) {
   if (pg.items.length % 2 === 1) kb.row();
   if (!pg.items.length) kb.text('Tidak ada layanan yang cocok', 'noop').row();
   navRow(kb, pg.page, pg.total, `svp:${server}`);
-  kb.text('⬅️ Kembali', s.country && s.country !== 'id' ? `cty:${s.country}` : 'reg:id');
+  kb.text('⬅️ Kembali', svUp(s));
   const cInfo = countryInfo(s.country);
   const judul = s.filter && s.filterServer === server ? `🔍 Hasil: <i>${esc(s.filterQ)}</i>` : 'Pilih layanan:';
   await edit(chatId, msgId, [
@@ -446,7 +583,7 @@ bot.callbackQuery(/^srv:(\w+)$/, async (ctx) => {
   const server = ctx.match[1];
   if (!SERVERS[server]) return;
   const s = S(ctx.from.id);
-  s.filter = null; s.search = null;
+  s.country = 'id'; s.filter = null; s.search = null; s.searchCountry = false;
   await showServices(ctx.chat.id, ctx.callbackQuery.message.message_id, ctx.from.id, server, 0);
 });
 
@@ -458,17 +595,25 @@ bot.callbackQuery(/^svp:(\w+):(\d+)$/, async (ctx) => {
 bot.callbackQuery(/^svs:(\w+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const s = S(ctx.from.id);
-  s.search = ctx.match[1];
+  s.search = ctx.match[1]; s.searchCountry = false;
   s.chatId = ctx.chat.id;
   s.msgId = ctx.callbackQuery.message.message_id;
   await render(ctx, '🔍 <b>Cari Layanan</b>\n\nKetik nama aplikasi yang kamu cari, contoh: <code>whatsapp</code>',
-    new InlineKeyboard().text('⬅️ Batal', `srv:${ctx.match[1]}`));
+    new InlineKeyboard().text('⬅️ Batal', svReopen(s, ctx.match[1])));
 });
 
 bot.on('message:text', async (ctx) => {
   const text = ctx.message.text.trim();
   if (text.startsWith('/')) return;
   const s = S(ctx.from.id);
+  if (s.searchCountry) {
+    ctx.deleteMessage().catch(() => {});
+    const q = text.toLowerCase();
+    s.cfilter = countryEntries(s.exServer).filter((c) => c[2].toLowerCase().includes(q) || c[0] === q);
+    s.cfilterQ = clip(text, 30);
+    s.searchCountry = false;
+    return showCountries(s.chatId, s.msgId, ctx.from.id, 0);
+  }
   if (!s.search) return ctx.reply('Ketik /start untuk membuka menu utama.').catch(() => {});
   ctx.deleteMessage().catch(() => {});
   const q = text.toLowerCase();
@@ -494,7 +639,7 @@ bot.callbackQuery(/^sv:(\w+):(.+)$/, async (ctx) => {
   const country = s.country || 'id';
   const cInfo = countryInfo(country);
   const r = await bn('/prices', { query: { server, service: code, country } });
-  const back = new InlineKeyboard().text('⬅️ Kembali', `srv:${server}`);
+  const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
   if (!r.ok) {
     const netErr = ['NETWORK', 'SERVER_UNREACHABLE'].includes(r.error);
     return render(ctx, `⚠️ ${cInfo && !netErr ? 'Layanan ini belum tersedia untuk negara / server tersebut.' : errText(r)}`, back);
@@ -520,7 +665,7 @@ async function showPrices(ctx, page) {
   });
   if (pg.items.length % 2 === 1) kb.row();
   navRow(kb, pg.page, pg.total, 'prp');
-  kb.text('⬅️ Kembali', `srv:${s.server}`);
+  kb.text('⬅️ Kembali', svReopen(s, s.server));
   await render(ctx, [
     `📱 <b>${esc(s.serviceName)}</b> · ${SERVERS[s.server].label}`, LINE,
     `💰 Saldo : <b>${rp(u.saldo)}</b>`,
@@ -805,6 +950,15 @@ bot.callbackQuery(/^od:(\d+)$/, async (ctx) => {
 
 /* ============================ ADMIN SEMENTARA ======================== */
 // /addsaldo <id_telegram> <jumlah>  — hanya untuk ADMIN_IDS (untuk tes sebelum gateway jadi)
+bot.command('updatenegara', async (ctx) => {
+  if (!ADMIN_IDS.includes(ctx.from.id)) return;
+  if (negaraRunning) return ctx.reply('⏳ Pembaruan daftar negara sedang berjalan.');
+  await ctx.reply('🌍 Memperbarui daftar negara... (± 5-10 menit). Kamu akan dapat kabar kalau sudah selesai.');
+  refreshNegara(true).then((ok) => ctx.reply(ok
+    ? `✅ Daftar negara diperbarui: Ekonomi ${negaraDb.ekonomi?.length ?? 0}, Premium ${negaraDb.premium?.length ?? 0}, Khusus ${negaraDb.khusus?.length ?? 0}.`
+    : '⚠️ Gagal memperbarui daftar negara. Cek log PM2.')).catch(() => {});
+});
+
 bot.command('addsaldo', async (ctx) => {
   if (!ADMIN_IDS.includes(ctx.from.id)) return;
   const [id, amt] = String(ctx.match).trim().split(/\s+/).map(Number);
@@ -833,5 +987,7 @@ bot.start({
   onStart: async (me) => {
     console.log(`✅ ${BRAND} berjalan sebagai @${me.username}`);
     await resumePending();
+    setTimeout(() => refreshNegara(false), 20000);                           // cek daftar negara setelah bot siap
+    setInterval(() => refreshNegara(false), 6 * 3600 * 1000).unref();        // dan diperiksa tiap 6 jam (diperbarui bila >24 jam)
   },
 });
