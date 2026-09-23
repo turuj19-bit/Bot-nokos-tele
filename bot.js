@@ -30,6 +30,7 @@ for (const [k, v] of Object.entries({ BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_
 const BRAND = 'PEDIA OTP';
 const TAGLINE = 'Layanan Nomor OTP Instan &amp; Terpercaya';
 const CHANNEL_URL = process.env.CHANNEL_URL || 'https://t.me/pediaotp';
+const CS_URL = process.env.CS_URL || 'https://t.me/farishost1';   // chat admin / CS
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map((s) => Number(s.trim())).filter(Boolean);
 
 const BN_BASE = 'https://dibanana.id/api/v1';
@@ -40,10 +41,28 @@ const LINE = '━━━━━━━━━━━━━━━━━━';
 
 // Server yang dijual (kode = parameter "server" di API dibanana.id)
 const SERVERS = {
-  ekonomi: { label: '💰 Ekonomi', desc: 'Stok banyak, harga hemat' },
-  premium: { label: '👑 Premium', desc: 'Kualitas OTP tinggi' },
-  khusus:  { label: '⭐ Khusus',  desc: 'Pilihan produk paling lengkap' },
+  ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga hemat' },
+  premium: { label: '👑 Premium', name: 'Premium', desc: 'Kualitas OTP tinggi' },
+  khusus:  { label: '⭐ Khusus',  name: 'Khusus',  desc: 'Pilihan produk paling lengkap' },
+  wa_luar: { label: '📲 WhatsApp Luar Negeri', name: 'WhatsApp Luar Negeri', desc: 'Khusus WhatsApp nomor luar negeri' },
 };
+const SERVERS_ID = ['ekonomi', 'premium', 'khusus'];              // menu Nomor Indonesia
+const SERVERS_EX = ['ekonomi', 'premium', 'khusus', 'wa_luar'];   // menu Nomor Luar Negeri
+
+// Daftar negara [kode API, bendera, nama]. Mau tambah/kurangi negara? Edit di sini saja.
+const COUNTRIES = [
+  ['my', '🇲🇾', 'Malaysia'], ['sg', '🇸🇬', 'Singapura'], ['us', '🇺🇸', 'Amerika Serikat'], ['uk', '🇬🇧', 'Inggris'],
+  ['th', '🇹🇭', 'Thailand'], ['vn', '🇻🇳', 'Vietnam'], ['ph', '🇵🇭', 'Filipina'], ['in', '🇮🇳', 'India'],
+  ['kh', '🇰🇭', 'Kamboja'], ['mm', '🇲🇲', 'Myanmar'], ['hk', '🇭🇰', 'Hong Kong'], ['cn', '🇨🇳', 'China'],
+  ['jp', '🇯🇵', 'Jepang'], ['kr', '🇰🇷', 'Korea Selatan'], ['au', '🇦🇺', 'Australia'], ['ca', '🇨🇦', 'Kanada'],
+  ['ru', '🇷🇺', 'Rusia'], ['ua', '🇺🇦', 'Ukraina'], ['tr', '🇹🇷', 'Turki'], ['sa', '🇸🇦', 'Arab Saudi'],
+  ['ae', '🇦🇪', 'Uni Emirat Arab'], ['eg', '🇪🇬', 'Mesir'], ['ng', '🇳🇬', 'Nigeria'], ['ke', '🇰🇪', 'Kenya'],
+  ['pk', '🇵🇰', 'Pakistan'], ['bd', '🇧🇩', 'Bangladesh'], ['br', '🇧🇷', 'Brasil'], ['mx', '🇲🇽', 'Meksiko'],
+  ['de', '🇩🇪', 'Jerman'], ['fr', '🇫🇷', 'Prancis'], ['es', '🇪🇸', 'Spanyol'], ['it', '🇮🇹', 'Italia'],
+  ['nl', '🇳🇱', 'Belanda'], ['pl', '🇵🇱', 'Polandia'],
+];
+const countryInfo = (code) =>
+  code && code !== 'id' ? (COUNTRIES.find((x) => x[0] === code) || [code, '🌍', String(code).toUpperCase()]) : null;
 
 const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const bot = new Bot(BOT_TOKEN);
@@ -188,7 +207,7 @@ function mainKb() {
   return new InlineKeyboard()
     .text('🛒 Buat Order', 'ord').text('💰 Deposit', 'dep').row()
     .text('📜 Riwayat Order', 'hist:0').text('ℹ️ Bantuan', 'help').row()
-    .url('📢 Channel Resmi', CHANNEL_URL);
+    .url('📢 Channel Resmi', CHANNEL_URL).url('💬 Hubungi CS', CS_URL);
 }
 
 async function dashboardText(u) {
@@ -199,25 +218,29 @@ async function dashboardText(u) {
   const bergabung = new Date(u.created_at).toLocaleDateString('id-ID', {
     day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta',
   });
+  const akun = [
+    '👤 <b>AKUN KAMU</b>',
+    `🆔 ID Telegram : <code>${u.id}</code>`,
+    `📛 Username : <code>${u.username ? '@' + esc(u.username) : 'Tidak ada'}</code>`,
+    `💰 Saldo : <b>${rp(u.saldo)}</b>`,
+    `✅ Order Sukses : ${count || 0}`,
+    `📅 Bergabung : ${bergabung}`,
+  ].join('\n');
+  const statistik = [
+    `📊 <b>STATISTIK ${BRAND}</b>`,
+    `👥 Total Pengguna : ${st.users.toLocaleString('id-ID')}`,
+    `🔑 Total OTP Sukses : ${st.sukses.toLocaleString('id-ID')}`,
+  ].join('\n');
   return [
     `📲 <b>${BRAND}</b>`,
     `<i>${TAGLINE}</i>`,
-    LINE,
+    '',
     `👋 ${salam()}, <b>${nama}</b>!`,
     'Pilih menu di bawah untuk mulai order nomor OTP.',
     '',
-    '👤 <b>Informasi Akun</b>',
-    `• ID Telegram : <code>${u.id}</code>`,
-    `• Username : <code>${u.username ? '@' + esc(u.username) : 'Tidak ada'}</code>`,
-    `• Bergabung : ${bergabung}`,
-    `• Saldo : <b>${rp(u.saldo)}</b>`,
-    `• Order Sukses : ${count || 0}`,
-    '',
-    `📊 <b>Statistik ${BRAND}</b>`,
-    `• Total Pengguna : ${st.users.toLocaleString('id-ID')}`,
-    `• Total OTP Sukses : ${st.sukses.toLocaleString('id-ID')}`,
-    LINE,
-    `🕐 Update: ${wibTime()} WIB`,
+    `<blockquote>${akun}</blockquote>`,
+    `<blockquote>${statistik}</blockquote>`,
+    `🕐 <i>Diperbarui ${wibTime()} WIB</i>`,
   ].join('\n');
 }
 
@@ -274,8 +297,8 @@ bot.callbackQuery('dep', async (ctx) => {
     '💰 <b>Deposit Saldo</b>', LINE,
     `Saldo kamu : <b>${rp(u.saldo)}</b>`, '',
     '🚧 Deposit otomatis sedang disiapkan.',
-    'Untuk isi saldo sementara, hubungi admin lewat channel resmi kami.',
-  ].join('\n'), new InlineKeyboard().url('📢 Channel Resmi', CHANNEL_URL).row().text('⬅️ Kembali', 'home'));
+    'Untuk isi saldo sementara, silakan hubungi CS kami.',
+  ].join('\n'), new InlineKeyboard().url('💬 Hubungi CS', CS_URL).row().url('📢 Channel Resmi', CHANNEL_URL).row().text('⬅️ Kembali', 'home'));
 });
 
 bot.callbackQuery('help', async (ctx) => {
@@ -283,7 +306,7 @@ bot.callbackQuery('help', async (ctx) => {
   await render(ctx, [
     'ℹ️ <b>Cara Order</b>', LINE,
     '1️⃣ Isi saldo lewat menu Deposit',
-    '2️⃣ Tekan <b>Buat Order</b>, pilih server dan layanan',
+    '2️⃣ Tekan <b>Buat Order</b>, pilih Nomor Indonesia atau Luar Negeri, lalu server dan layanan',
     '3️⃣ Pilih harga, lalu konfirmasi pembelian',
     '4️⃣ Masukkan nomor ke aplikasi tujuan',
     '5️⃣ OTP muncul otomatis di chat ini',
@@ -291,7 +314,9 @@ bot.callbackQuery('help', async (ctx) => {
     '🔁 Bisa minta SMS ke-2 (gratis) setelah OTP pertama masuk.',
     '❌ Order bisa dibatalkan setelah 2 menit jika OTP belum masuk, saldo kembali penuh.',
     '⌛ Jika OTP tidak masuk sampai batas waktu, saldo otomatis kembali.',
-  ].join('\n'), new InlineKeyboard().url('📢 Channel Resmi', CHANNEL_URL).row().text('⬅️ Kembali', 'home'));
+    '',
+    '💬 Ada kendala? Hubungi CS kami.',
+  ].join('\n'), new InlineKeyboard().url('💬 Hubungi CS', CS_URL).row().url('📢 Channel Resmi', CHANNEL_URL).row().text('⬅️ Kembali', 'home'));
 });
 
 /* ============================== LAYANAN ============================== */
@@ -322,15 +347,68 @@ bot.callbackQuery('ord', async (ctx) => {
   if (mk.maintenance) {
     return render(ctx, '🛠 <b>Sedang Maintenance</b>\n\nOrder dimatikan sementara. Silakan coba lagi nanti.', homeBtn());
   }
+  const s = S(ctx.from.id);
+  s.country = 'id'; s.filter = null; s.search = null;
+  const kb = new InlineKeyboard()
+    .text('🇮🇩 Nomor Indonesia', 'reg:id').row()
+    .text('🌍 Nomor Luar Negeri', 'reg:ex').row()
+    .text('📜 Riwayat Order', 'hist:0').row()
+    .text('⬅️ Kembali', 'home');
+  await render(ctx, [
+    '🛒 <b>Buat Order</b>', LINE,
+    'Pilih jenis nomor:', '',
+    '🇮🇩 <b>Nomor Indonesia</b>',
+    '└ OTP dengan nomor +62', '',
+    '🌍 <b>Nomor Luar Negeri</b>',
+    '└ Pilih negara, banyak pilihan', LINE,
+  ].join('\n'), kb);
+});
+
+function pickerView(country) {
+  const c = countryInfo(country);
+  const list = c ? SERVERS_EX : SERVERS_ID;
+  const lines = ['🛒 <b>Buat Order</b>', LINE, c ? `🌍 Negara : ${c[1]} <b>${esc(c[2])}</b>` : '🇮🇩 <b>Nomor Indonesia</b>', '', 'Pilih server sesuai kebutuhanmu:', ''];
   const kb = new InlineKeyboard();
-  const lines = ['🛒 <b>Buat Order</b>', LINE, 'Pilih server sesuai kebutuhanmu:', ''];
-  for (const [code, sv] of Object.entries(SERVERS)) {
-    lines.push(`${sv.label.replace(/^(\S+) (.+)$/, '$1 <b>$2</b>')}`, `└ ${sv.desc}`, '');
-    kb.text(sv.label, `srv:${code}`);
+  for (const code of list) {
+    const sv = SERVERS[code];
+    lines.push(sv.label.replace(/^(\S+) (.+)$/, '$1 <b>$2</b>'), `└ ${sv.desc}`, '');
+    kb.text(sv.label, `srv:${code}`).row();
   }
-  kb.row().text('📜 Riwayat Order', 'hist:0').row().text('⬅️ Kembali', 'home');
+  kb.text('⬅️ Kembali', c ? 'ctp:0' : 'ord');
   lines.push(LINE);
-  await render(ctx, lines.join('\n'), kb);
+  return { text: lines.join('\n'), kb };
+}
+
+bot.callbackQuery('reg:id', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const s = S(ctx.from.id);
+  s.country = 'id'; s.filter = null; s.search = null;
+  const v = pickerView('id');
+  await render(ctx, v.text, v.kb);
+});
+
+async function showCountries(ctx, page) {
+  const pg = paginate(COUNTRIES, page, PER_PAGE);
+  const kb = new InlineKeyboard();
+  pg.items.forEach((c, i) => {
+    kb.text(`${c[1]} ${c[2]}`, `cty:${c[0]}`);
+    if (i % 2 === 1) kb.row();
+  });
+  if (pg.items.length % 2 === 1) kb.row();
+  navRow(kb, pg.page, pg.total, 'ctp');
+  kb.text('⬅️ Kembali', 'ord');
+  await render(ctx, ['🌍 <b>Nomor Luar Negeri</b>', LINE, `Pilih negara: (${pg.page + 1}/${pg.total})`].join('\n'), kb);
+}
+bot.callbackQuery('reg:ex', async (ctx) => { await ctx.answerCallbackQuery(); await showCountries(ctx, 0); });
+bot.callbackQuery(/^ctp:(\d+)$/, async (ctx) => { await ctx.answerCallbackQuery(); await showCountries(ctx, Number(ctx.match[1])); });
+
+bot.callbackQuery(/^cty:(\w+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  if (!COUNTRIES.some((c) => c[0] === ctx.match[1])) return;
+  const s = S(ctx.from.id);
+  s.country = ctx.match[1]; s.filter = null; s.search = null;
+  const v = pickerView(s.country);
+  await render(ctx, v.text, v.kb);
 });
 
 async function showServices(chatId, msgId, uid, server, page) {
@@ -340,7 +418,7 @@ async function showServices(chatId, msgId, uid, server, page) {
     all = s.filter && s.filterServer === server ? s.filter : await getServices(server);
   } catch (e) {
     return edit(chatId, msgId, `⚠️ Gagal memuat daftar layanan.\n${errText({ error: e.message })}`,
-      new InlineKeyboard().text('🔄 Coba Lagi', `srv:${server}`).row().text('⬅️ Kembali', 'ord'));
+      new InlineKeyboard().text('🔄 Coba Lagi', `srv:${server}`).row().text('⬅️ Kembali', s.country && s.country !== 'id' ? `cty:${s.country}` : 'reg:id'));
   }
   const u = await getUser(uid);
   const pg = paginate(all, page, PER_PAGE);
@@ -352,10 +430,12 @@ async function showServices(chatId, msgId, uid, server, page) {
   if (pg.items.length % 2 === 1) kb.row();
   if (!pg.items.length) kb.text('Tidak ada layanan yang cocok', 'noop').row();
   navRow(kb, pg.page, pg.total, `svp:${server}`);
-  kb.text('⬅️ Kembali', 'ord');
+  kb.text('⬅️ Kembali', s.country && s.country !== 'id' ? `cty:${s.country}` : 'reg:id');
+  const cInfo = countryInfo(s.country);
   const judul = s.filter && s.filterServer === server ? `🔍 Hasil: <i>${esc(s.filterQ)}</i>` : 'Pilih layanan:';
   await edit(chatId, msgId, [
-    `${SERVERS[server].label} <b>Server ${SERVERS[server].label.split(' ')[1]}</b>`, LINE,
+    `${SERVERS[server].label.split(' ')[0]} <b>Server ${SERVERS[server].name}</b>`,
+    ...(cInfo ? [`🌍 Negara : ${cInfo[1]} ${esc(cInfo[2])}`] : []), LINE,
     `💰 Saldo : <b>${rp(u.saldo)}</b>`, LINE,
     `${judul} (${pg.page + 1}/${pg.total})`,
   ].join('\n'), kb);
@@ -411,14 +491,19 @@ bot.callbackQuery(/^sv:(\w+):(.+)$/, async (ctx) => {
   let name = code;
   try { name = (await getServices(server)).find((x) => String(x.code) === code)?.name || code; } catch { /* abaikan */ }
   await render(ctx, '⏳ Mengambil harga terbaru...');
-  const r = await bn('/prices', { query: { server, service: code, country: 'id' } });
+  const country = s.country || 'id';
+  const cInfo = countryInfo(country);
+  const r = await bn('/prices', { query: { server, service: code, country } });
   const back = new InlineKeyboard().text('⬅️ Kembali', `srv:${server}`);
-  if (!r.ok) return render(ctx, `⚠️ ${errText(r)}`, back);
+  if (!r.ok) {
+    const netErr = ['NETWORK', 'SERVER_UNREACHABLE'].includes(r.error);
+    return render(ctx, `⚠️ ${cInfo && !netErr ? 'Layanan ini belum tersedia untuk negara / server tersebut.' : errText(r)}`, back);
+  }
   const providers = (r.providers || []).filter((p) => p.stock > 0).sort((a, b) => a.price_idr - b.price_idr);
   if (!providers.length) {
     return render(ctx, `😔 <b>Stok ${esc(name)} sedang kosong</b>\n\nCoba server lain atau kembali lagi nanti.`, back);
   }
-  Object.assign(s, { server, service: code, serviceName: name, providers, pricePage: 0 });
+  Object.assign(s, { server, service: code, serviceName: cInfo ? `${cInfo[1]} ${name}` : name, providers, pricePage: 0 });
   await showPrices(ctx, 0);
 });
 
@@ -598,19 +683,32 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     if (mk.maintenance) { await ctx.answerCallbackQuery({ text: 'Sedang maintenance.', show_alert: true }); return; }
     const jual = calcJual(p.price_idr, mk);
 
-    if (!(await debit(uid, jual))) {
-      await ctx.answerCallbackQuery({ text: 'Saldo tidak cukup.', show_alert: true });
-      return;
-    }
     await ctx.answerCallbackQuery();
+    await render(ctx, '⏳ <b>Memeriksa stok terbaru...</b>');
+
+    // CEK ULANG ke pusat sebelum saldo dipotong: kalau harga pusat sudah naik / stok berubah,
+    // order ditolak dengan pesan "stok habis" (supaya kamu tidak rugi).
+    const reload = new InlineKeyboard()
+      .text('🔄 Muat Ulang Harga', `sv:${s.server}:${s.service}`).row().text('🏠 Menu Utama', 'home');
+    const fresh = await bn('/prices', { query: { server: s.server, service: s.service, country: s.country || 'id' } });
+    if (!fresh.ok) return render(ctx, `⚠️ ${errText(fresh)}`, reload);
+    const list = (fresh.providers || []).filter((x) => x.stock > 0);
+    const cur = list.find((x) => x.id === p.id && x.price_idr <= p.price_idr)
+      || list.find((x) => x.price_idr === p.price_idr);
+    if (!cur) {
+      return render(ctx, '😔 <b>Stok sedang habis</b>\n\nStok untuk pilihan ini baru saja habis. Silakan muat ulang harga dan coba lagi.', reload);
+    }
+
+    if (!(await debit(uid, jual))) {
+      return render(ctx, '⚠️ <b>Saldo tidak cukup</b>\n\nSilakan isi saldo dulu.',
+        new InlineKeyboard().text('💰 Deposit Saldo', 'dep').row().text('🏠 Menu Utama', 'home'));
+    }
     await render(ctx, '⏳ <b>Memproses order...</b>\nMohon tunggu sebentar.');
 
     const body = (id) => (s.server === 'premium' ? { id, operator: 'any' } : { id });
-    let r = await bn('/order', { method: 'POST', body: body(p.id) });
-    if (!r.ok && r.error === 'INVALID_PRODUCT_ID') {   // id kedaluwarsa -> ambil ulang, cari harga yang sama
-      const pr = await bn('/prices', { query: { server: s.server, service: s.service, country: 'id' } });
-      const same = pr.ok && (pr.providers || []).find((x) => x.price_idr === p.price_idr && x.stock > 0);
-      if (same) r = await bn('/order', { method: 'POST', body: body(same.id) });
+    const r = await bn('/order', { method: 'POST', body: body(cur.id) });
+    if (r.ok && Number(r.price_idr) > p.price_idr) {
+      notifyAdmins(`⚠️ Order #${r.order_id}: modal Rp${r.price_idr} lebih besar dari harga tampil Rp${p.price_idr}. Cek margin.`);
     }
     if (!r.ok) {
       await credit(uid, jual);
