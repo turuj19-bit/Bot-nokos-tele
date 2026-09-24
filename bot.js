@@ -1002,20 +1002,47 @@ const OPERATORS = [
   { code: 'smartfren', label: 'Smartfren' },
 ];
 
+// Cek stok real tiap operator ke API pusat (dibanana.id), bukan pajangan statis.
+async function operatorHasStock(server, code, country, operatorCode) {
+  const query = { server, service: code, country };
+  if (operatorCode) query.operator = operatorCode;
+  const r = await bn('/prices', { query });
+  return !!(r.ok && (r.providers || []).some((p) => p.stock > 0));
+}
+
 async function showOperatorPicker(ctx, server, code, name) {
   const s = S(ctx.from.id);
-  const kb = new InlineKeyboard()
-    .text(OPERATORS[0].label, `op:${server}:${code}:${OPERATORS[0].code}`).row()
-    .text(OPERATORS[1].label, `op:${server}:${code}:${OPERATORS[1].code}`)
-    .text(OPERATORS[2].label, `op:${server}:${code}:${OPERATORS[2].code}`).row()
-    .text(OPERATORS[3].label, `op:${server}:${code}:${OPERATORS[3].code}`)
-    .text(OPERATORS[4].label, `op:${server}:${code}:${OPERATORS[4].code}`).row()
-    .text(OPERATORS[5].label, `op:${server}:${code}:${OPERATORS[5].code}`).row()
-    .text('⬅️ Kembali', svReopen(s, server));
-  await render(ctx, [
-    `${SERVERS[server].label.split(' ')[0]} <b>${esc(name)} — Server ${SERVERS[server].name}</b>`, LINE,
-    'Pilih operator:',
-  ].join('\n'), kb);
+  const country = s.country || 'id';
+  const header = [`${SERVERS[server].label.split(' ')[0]} <b>${esc(name)} — Server ${SERVERS[server].name}</b>`, LINE];
+  const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
+  await render(ctx, [...header, '⏳ Mengecek stok tiap operator ke server pusat...'].join('\n'));
+
+  let checks;
+  try {
+    checks = await Promise.all(OPERATORS.map(async (op) => ({
+      op, ok: await operatorHasStock(server, code, country, op.code),
+    })));
+  } catch {
+    return render(ctx, [...header, '⚠️ Gagal mengambil data stok dari server pusat. Coba lagi.'].join('\n'), back);
+  }
+
+  const avail = checks.filter((c) => c.ok).map((c) => c.op);
+  if (!avail.length) {
+    return render(ctx, [...header, `😔 Stok ${esc(name)} sedang kosong untuk semua operator.`].join('\n'), back);
+  }
+
+  const kb = new InlineKeyboard();
+  const any = avail.find((o) => o.code === 'any');
+  const rest = avail.filter((o) => o.code !== 'any');
+  if (any) kb.text(any.label, `op:${server}:${code}:${any.code}`).row();
+  rest.forEach((op, i) => {
+    kb.text(op.label, `op:${server}:${code}:${op.code}`);
+    if (i % 2 === 1) kb.row();
+  });
+  if (rest.length % 2 === 1) kb.row();
+  kb.text('⬅️ Kembali', svReopen(s, server));
+
+  await render(ctx, [...header, 'Pilih operator (hanya yang stoknya tersedia yang tampil):'].join('\n'), kb);
 }
 
 async function loadPrices(ctx, server, code, operator) {
