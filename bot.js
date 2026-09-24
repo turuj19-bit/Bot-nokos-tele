@@ -1097,7 +1097,8 @@ async function showPrices(ctx, page) {
   s.pricePage = pg.page;
   const kb = new InlineKeyboard();
   pg.items.forEach((p, i) => {
-    kb.text(`${rp(calcJual(p.price_idr, mk))} | 📦${p.stock}`, `pr:${pg.page * PER_PAGE + i}`);
+    const harga = calcJual(p.price_idr, mk).toLocaleString('id-ID');
+    kb.text(`${harga} | 📦 ${p.stock}`, `pr:${pg.page * PER_PAGE + i}`);
     if (i % 2 === 1) kb.row();
   });
   if (pg.items.length % 2 === 1) kb.row();
@@ -1107,7 +1108,7 @@ async function showPrices(ctx, page) {
     `📱 <b>${esc(s.serviceName)}</b> · ${SERVERS[s.server].label}`, LINE,
     `💰 Saldo : <b>${rp(u.saldo)}</b>`,
     `🔄 Update : ${wibTime()} WIB`, LINE,
-    `Pilih harga: (${pg.page + 1}/${pg.total})`,
+    `Pilih harga (Rp): (${pg.page + 1}/${pg.total})`,
     '<i>📦 = stok tersedia</i>',
   ].join('\n'), kb);
 }
