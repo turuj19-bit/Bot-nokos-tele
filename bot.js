@@ -529,7 +529,7 @@ bot.callbackQuery('home', async (ctx) => {
 bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery());
 
 /* ============================ DEPOSIT (QRIS DOKU) ===================== */
-const DEPOSIT_PRESETS = [10000, 25000, 50000, 100000, 250000, 500000, 1000000];
+const DEPOSIT_PRESETS = [1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
 const DEPOSIT_MIN = 1000;
 const DEPOSIT_MAX = 10000000;
 const QRIS_FEE_PERSEN = Number(process.env.QRIS_FEE_PERSEN ?? 0.7); // biaya qris dibebankan ke user, sesuaikan bila perlu
