@@ -446,7 +446,7 @@ function mainKb() {
   return new InlineKeyboard()
     .text('🛒 Buat Order', 'ord').row()
     .text('💰 Deposit', 'dep').text('📜 Riwayat Order', 'hist:0').row()
-    .url('🔎 Monitor Transaksi', MONITOR_CHANNEL_URL).url('🔢 Cek Nomor', CEKNOMOR_URL).row()
+    .url('🔎 Monitor', MONITOR_CHANNEL_URL).url('🔢 Cek Nomor', CEKNOMOR_URL).row()
     .text('ℹ️ Bantuan', 'help').url('💬 Hubungi CS', CS_URL).row()
     .url('📢 Channel Resmi', CHANNEL_URL);
 }
@@ -753,7 +753,7 @@ bot.callbackQuery('help', async (ctx) => {
     '⏰ Setiap kode QRIS punya batas waktu (expired). Jika lewat waktu, batalkan dan buat ulang lewat menu Deposit',
     '❌ Belum sempat bayar? Tekan <b>Batalkan Pembayaran</b> pada invoice, lalu buat invoice baru',
     '',
-    '🔎 Semua transaksi OTP & deposit yang berhasil juga bisa dipantau real-time di menu <b>Monitor Transaksi</b>.',
+    '🔎 Semua transaksi OTP & deposit yang berhasil juga bisa dipantau real-time di menu <b>Monitor</b>.',
     '🔢 Menu <b>Cek Nomor</b> berguna untuk mengecek riwayat pemakaian sebuah nomor sebelum dipakai order.',
     '',
     '💬 Ada kendala? Hubungi CS kami.',
