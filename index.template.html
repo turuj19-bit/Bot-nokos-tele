@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080b0a" />
+<title>PEDIA OTP · Admin Panel</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#080b0a;--bg-2:#0d1210;--card:#111815;--card-2:#151e19;--card-3:#1a241f;
+  --border:#1e2a24;--border-2:#28372f;--green:#10b981;--green-2:#22c55e;--green-3:#34d399;
+  --green-glow:rgba(16,185,129,.18);--green-soft:rgba(16,185,129,.08);
+  --text:#e6f1ec;--text-2:#a8b8b0;--muted:#6b7c73;
+  --red:#ef4444;--red-soft:rgba(239,68,68,.12);--yellow:#f59e0b;--yellow-soft:rgba(245,158,11,.12);
+  --blue:#3b82f6;--blue-soft:rgba(59,130,246,.12);--purple:#a78bfa;--purple-soft:rgba(167,139,250,.12);
+  --radius:14px;--radius-sm:10px;--radius-xs:8px;
+  --shadow:0 6px 24px rgba(0,0,0,.45);--shadow-sm:0 2px 8px rgba(0,0,0,.35);
+  --sidebar-w:248px;--topbar-h:60px;
+  --ff:'Inter','Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%;overflow:hidden}
+body{font-family:var(--ff);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;
+  overflow-x:hidden;background-image:radial-gradient(circle at 0% 0%,rgba(16,185,129,.06),transparent 40%),
+  radial-gradient(circle at 100% 100%,rgba(34,197,94,.04),transparent 40%);background-attachment:fixed}
+a{color:var(--green);text-decoration:none}
+button{font-family:inherit}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#1e2a24;border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:#2a3a32}
+
+.login-wrap{height:100vh;height:100dvh;display:flex;align-items:center;justify-content:center;
+  padding:20px;position:relative;overflow-y:auto}
+.login-wrap::before{content:"";position:absolute;inset:0;
+  background:radial-gradient(circle at 30% 20%,rgba(16,185,129,.10),transparent 50%),
+  radial-gradient(circle at 70% 80%,rgba(34,197,94,.08),transparent 50%);pointer-events:none}
+.login-card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--border);
+  border-radius:20px;padding:32px 28px;box-shadow:var(--shadow);position:relative;z-index:1;
+  animation:slideUp .5s cubic-bezier(.2,.9,.3,1)}
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.login-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:6px}
+.login-logo .brand-mark{width:44px;height:44px;border-radius:12px;
+  background:linear-gradient(135deg,var(--green),var(--green-2));display:flex;align-items:center;
+  justify-content:center;color:#04140d;font-weight:800;box-shadow:0 8px 20px var(--green-glow)}
+.login-logo .brand-text{font-weight:800;font-size:20px;letter-spacing:.5px}
+.login-logo .brand-text span{color:var(--green)}
+.login-sub{text-align:center;color:var(--muted);font-size:12.5px;margin-bottom:26px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--text-2);margin-bottom:6px;font-weight:500}
+.input-wrap{position:relative;display:flex;align-items:center}
+.input-wrap .ico{position:absolute;left:12px;color:var(--muted);display:flex;pointer-events:none}
+.input,.textarea,.select{width:100%;background:var(--bg-2);border:1px solid var(--border);color:var(--text);
+  border-radius:var(--radius-sm);padding:11px 12px;font-size:14px;font-family:inherit;
+  transition:border-color .2s,box-shadow .2s;outline:none}
+.input-wrap .input{padding-left:38px}
+.input:focus,.textarea:focus,.select:focus{border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.input::placeholder,.textarea::placeholder{color:#4b5a52}
+.input-wrap .toggle-pass{position:absolute;right:8px;background:transparent;border:0;color:var(--muted);
+  cursor:pointer;padding:6px;border-radius:6px;display:flex;align-items:center}
+.input-wrap .toggle-pass:hover{color:var(--green);background:var(--green-soft)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 16px;
+  border-radius:var(--radius-sm);border:1px solid transparent;font-weight:600;font-size:14px;
+  cursor:pointer;transition:all .2s;white-space:nowrap;user-select:none;font-family:inherit}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn-primary{background:linear-gradient(135deg,var(--green),var(--green-2));color:#04140d;box-shadow:0 4px 14px var(--green-glow)}
+.btn-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 22px var(--green-glow)}
+.btn-block{width:100%}
+.btn-ghost{background:var(--card-2);color:var(--text);border-color:var(--border)}
+.btn-ghost:hover:not(:disabled){background:var(--card-3);border-color:var(--border-2)}
+.btn-danger{background:var(--red-soft);color:#fca5a5;border-color:rgba(239,68,68,.3)}
+.btn-danger:hover:not(:disabled){background:rgba(239,68,68,.2)}
+.btn-sm{padding:7px 12px;font-size:12.5px;border-radius:8px}
+.btn-xs{padding:5px 9px;font-size:11.5px;border-radius:6px;gap:4px}
+.btn-icon{padding:9px;width:38px;height:38px;justify-content:center}
+.spinner{width:15px;height:15px;border:2px solid currentColor;border-top-color:transparent;
+  border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.app{display:flex;height:100vh;height:100dvh}
+.sidebar{width:var(--sidebar-w);background:var(--card);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;flex-shrink:0;position:fixed;top:0;left:0;bottom:0;z-index:50;
+  transition:transform .28s cubic-bezier(.2,.9,.3,1)}
+.sidebar-head{height:var(--topbar-h);display:flex;align-items:center;gap:10px;padding:0 18px;
+  border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-head .mark{width:32px;height:32px;border-radius:9px;
+  background:linear-gradient(135deg,var(--green),var(--green-2));display:flex;align-items:center;
+  justify-content:center;color:#04140d;font-weight:800;font-size:14px}
+.sidebar-head .name{font-weight:800;font-size:15px;letter-spacing:.3px}
+.sidebar-head .name span{color:var(--green)}
+.nav{flex:1;overflow-y:auto;padding:14px 10px}
+.nav-group{margin-bottom:6px}
+.nav-label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;
+  padding:10px 12px 6px;font-weight:700}
+.nav-item{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:var(--radius-sm);
+  color:var(--text-2);cursor:pointer;transition:all .15s;font-size:13.5px;font-weight:500;
+  user-select:none;position:relative}
+.nav-item:hover{background:var(--card-2);color:var(--text)}
+.nav-item.active{background:var(--green-soft);color:var(--green);font-weight:600}
+.nav-item.active::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:3px;height:20px;border-radius:0 3px 3px 0;background:var(--green)}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+
+.main-wrap{flex:1;margin-left:var(--sidebar-w);display:flex;flex-direction:column;min-width:0;height:100%;overflow:hidden}
+.topbar{height:var(--topbar-h);flex-shrink:0;background:#0d1210;border-bottom:1px solid var(--border);display:flex;align-items:center;
+  padding:0 16px;gap:12px;position:relative;z-index:40}
+.hamburger{display:none;background:var(--card-2);border:1px solid var(--border);color:var(--text);
+  width:36px;height:36px;border-radius:10px;cursor:pointer;align-items:center;justify-content:center}
+.page-title{font-size:15.5px;font-weight:700;color:var(--text);margin:0;flex:1;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-right{display:flex;align-items:center;gap:8px}
+.sys-status{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;
+  background:var(--green-soft);color:var(--green);font-size:11.5px;font-weight:600;
+  border:1px solid rgba(16,185,129,.2)}
+.sys-status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.sys-status.maint{background:var(--yellow-soft);color:var(--yellow);border-color:rgba(245,158,11,.3)}
+.sys-status.maint .dot{background:var(--yellow)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.admin-chip{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;
+  background:var(--card-2);border:1px solid var(--border);border-radius:20px;font-size:12.5px;font-weight:600}
+.admin-chip .av{width:26px;height:26px;border-radius:50%;
+  background:linear-gradient(135deg,var(--green),var(--green-2));display:flex;align-items:center;
+  justify-content:center;color:#04140d;font-weight:800;font-size:11px}
+.content{flex:1;padding:20px;max-width:100%;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch}
+@media (max-width:900px){.sidebar{transform:translateX(-100%);box-shadow:0 0 40px rgba(0,0,0,.5)}
+  .sidebar.open{transform:translateX(0)}.main-wrap{margin-left:0}.hamburger{display:flex}
+  .content{padding:14px}.admin-chip .name-full{display:none}.sys-status .label{display:none}}
+.sidebar-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;opacity:0;
+  pointer-events:none;transition:opacity .25s;backdrop-filter:blur(2px)}
+.sidebar-backdrop.show{opacity:1;pointer-events:auto}
+@media (min-width:901px){.sidebar-backdrop{display:none}}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px;box-shadow:var(--shadow-sm)}
+.card-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px}
+.card-title{font-size:14px;font-weight:700;margin:0;display:flex;align-items:center;gap:8px;color:var(--text)}
+.card-sub{color:var(--muted);font-size:11.5px;font-weight:500}
+.grid{display:grid;gap:14px}
+.grid-6{grid-template-columns:repeat(6,1fr)}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+@media (max-width:1400px){.grid-6{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:1100px){.grid-6{grid-template-columns:repeat(2,1fr)}.grid-4{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:720px){.grid-6,.grid-4,.grid-3,.grid-2{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.grid-6,.grid-4,.grid-3,.grid-2{grid-template-columns:1fr}}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;
+  display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden;transition:border-color .2s,transform .2s}
+.stat:hover{border-color:var(--border-2);transform:translateY(-1px)}
+.stat::after{content:"";position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--green),transparent);opacity:.5}
+.stat .stat-ico{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;background:var(--green-soft);color:var(--green)}
+.stat-label{font-size:11.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.stat-val{font-size:20px;font-weight:800;letter-spacing:-.3px;color:var(--text);word-break:break-word}
+.stat-hint{font-size:11px;color:var(--muted)}
+
+.tbl-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border);background:var(--card)}
+table.tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}
+table.tbl thead th{text-align:left;padding:11px 14px;background:var(--card-2);color:var(--text-2);
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  border-bottom:1px solid var(--border);white-space:nowrap}
+table.tbl tbody td{padding:11px 14px;border-bottom:1px solid var(--border);color:var(--text);white-space:nowrap}
+table.tbl tbody tr:last-child td{border-bottom:0}
+table.tbl tbody tr:hover{background:var(--card-2)}
+.mono{font-family:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.muted{color:var(--muted)}
+.center{text-align:center}.right{text-align:right}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;
+  font-size:11px;font-weight:700;letter-spacing:.2px;text-transform:uppercase}
+.badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge-green{background:var(--green-soft);color:var(--green)}
+.badge-red{background:var(--red-soft);color:#fca5a5}
+.badge-yellow{background:var(--yellow-soft);color:#fbbf24}
+.badge-blue{background:var(--blue-soft);color:#93c5fd}
+.badge-purple{background:var(--purple-soft);color:#c4b5fd}
+.badge-gray{background:var(--card-3);color:var(--text-2)}
+
+.tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.tools .input,.tools .select{width:auto;min-width:150px;padding:9px 12px;font-size:13px}
+.tools .input-search{min-width:220px;flex:1}
+@media (max-width:600px){.tools{gap:8px}
+  .tools .input,.tools .select,.tools .input-search{width:100%;min-width:0;flex:1 1 100%}}
+.pagination{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+.pagination .pg-info{color:var(--muted);font-size:12.5px;flex:1}
+.pagination button{background:var(--card-2);border:1px solid var(--border);color:var(--text);
+  padding:7px 11px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;transition:all .15s}
+.pagination button:hover:not(:disabled){background:var(--card-3);border-color:var(--border-2)}
+.pagination button:disabled{opacity:.4;cursor:not-allowed}
+.pagination button.active{background:var(--green-soft);border-color:var(--green);color:var(--green)}
+
+.modal-root{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;display:flex;
+  align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px);
+  -webkit-backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-root.show{opacity:1;pointer-events:auto}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:18px;width:100%;max-width:560px;
+  max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6);
+  transform:scale(.96) translateY(8px);transition:transform .25s cubic-bezier(.2,.9,.3,1);overflow:hidden}
+.modal-root.show .modal{transform:scale(1) translateY(0)}
+.modal.wide{max-width:820px}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 20px;
+  border-bottom:1px solid var(--border);flex-shrink:0}
+.modal-head h3{margin:0;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.modal-head .close{background:transparent;border:0;color:var(--muted);cursor:pointer;padding:6px;
+  border-radius:8px;display:flex}
+.modal-head .close:hover{background:var(--card-2);color:var(--text)}
+.modal-body{padding:18px 20px;overflow-y:auto;flex:1}
+.modal-foot{padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;
+  justify-content:flex-end;flex-shrink:0;flex-wrap:wrap}
+@media (max-width:520px){.modal-foot{flex-direction:column-reverse}.modal-foot .btn{width:100%}}
+.dt{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:14px}
+.dt .row{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:var(--bg-2);
+  border-radius:10px;border:1px solid var(--border)}
+.dt .row .lbl{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.dt .row .val{font-size:13.5px;color:var(--text);font-weight:600;word-break:break-word}
+@media (max-width:520px){.dt{grid-template-columns:1fr}}
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:14px;overflow-x:auto}
+.tab{padding:9px 14px;background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:13px;
+  font-weight:600;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.tab:hover{color:var(--text)}.tab.active{color:var(--green);border-bottom-color:var(--green)}
+
+.toasts{position:fixed;top:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;
+  max-width:min(360px,calc(100vw - 32px));pointer-events:none}
+.toast{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--green);
+  padding:12px 14px;border-radius:12px;box-shadow:var(--shadow);display:flex;gap:10px;
+  align-items:flex-start;transform:translateX(120%);transition:transform .3s cubic-bezier(.2,.9,.3,1),opacity .3s;
+  opacity:0;pointer-events:auto;font-size:13px}
+.toast.show{transform:translateX(0);opacity:1}
+.toast .t-ico{flex-shrink:0;color:var(--green);margin-top:1px}
+.toast-success{border-left-color:var(--green)}
+.toast-error{border-left-color:var(--red)}.toast-error .t-ico{color:var(--red)}
+.toast-warning{border-left-color:var(--yellow)}.toast-warning .t-ico{color:var(--yellow)}
+.toast-info{border-left-color:var(--blue)}.toast-info .t-ico{color:var(--blue)}
+
+.loading-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:250;display:flex;
+  align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.loading-overlay .box{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:18px 22px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow)}
+.skeleton{background:linear-gradient(90deg,var(--card-2) 25%,var(--card-3) 50%,var(--card-2) 75%);
+  background-size:200% 100%;animation:sk 1.4s infinite;border-radius:8px}
+@keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.sk-line{height:14px;margin:8px 0}.sk-block{height:120px;border-radius:var(--radius)}
+
+.section{margin-bottom:20px}
+.section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--text-2);margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.section-title::after{content:"";flex:1;height:1px;background:var(--border)}
+.empty{text-align:center;padding:34px 20px;color:var(--muted)}
+.empty svg{opacity:.4;margin-bottom:10px;color:var(--muted)}
+.empty p{margin:0;font-size:13px}
+.chart-box{position:relative;height:240px}
+@media (max-width:520px){.chart-box{height:200px}}
+.list-rows{display:flex;flex-direction:column;gap:8px}
+.list-row{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;
+  background:var(--bg-2);border:1px solid var(--border);transition:border-color .15s}
+.list-row:hover{border-color:var(--border-2)}
+.list-row .lr-main{flex:1;min-width:0}
+.list-row .lr-title{font-weight:600;font-size:13px;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.list-row .lr-sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+.list-row .lr-right{text-align:right;font-size:12.5px;flex-shrink:0}
+
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:600px){.form-grid{grid-template-columns:1fr}}
+.select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7c73' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center;padding-right:34px}
+.textarea{min-height:96px;resize:vertical;font-family:inherit}
+.switch{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;cursor:pointer;inset:0;background:#2a3a32;transition:.2s;border-radius:24px}
+.switch .slider::before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;
+  background:#6b7c73;transition:.2s;border-radius:50%}
+.switch input:checked + .slider{background:var(--green)}
+.switch input:checked + .slider::before{transform:translateX(20px);background:#04140d}
+.switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;
+  background:var(--bg-2);border:1px solid var(--border);border-radius:10px}
+.switch-row .lbl{font-weight:600;font-size:13px}
+.switch-row .desc{font-size:11.5px;color:var(--muted);margin-top:2px}
+.kv{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--border);font-size:13px}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--muted)}.kv .v{font-weight:600}
+.total-row{padding-top:10px;border-top:2px solid var(--border);font-size:15px}
+.preview{background:var(--bg-2);border:1px dashed var(--border-2);border-radius:12px;padding:14px;
+  min-height:80px;font-size:13px;white-space:pre-wrap;word-break:break-word}
+.preview img{max-width:100%;border-radius:8px;margin-top:8px;max-height:240px;object-fit:cover}
+.mb-0{margin-bottom:0}.mb-1{margin-bottom:8px}.mb-2{margin-bottom:14px}
+.mt-1{margin-top:8px}.mt-2{margin-top:14px}
+.hidden{display:none!important}
+.flex{display:flex;gap:8px;align-items:center}
+.full{width:100%}
+/* ===== Dashboard: petak rapi ===== */
+.grid-dash{display:grid;gap:12px;grid-template-columns:repeat(3,1fr)}
+@media (min-width:1200px){.grid-dash{grid-template-columns:repeat(6,1fr)}}
+@media (max-width:560px){.grid-dash{grid-template-columns:repeat(2,1fr);gap:10px}}
+.grid-dash .stat{padding:13px 13px 12px;gap:5px;border-radius:16px;min-width:0}
+.grid-dash .stat-label{font-size:10.5px;letter-spacing:.3px;line-height:1.3}
+.grid-dash .stat-val{font-size:18px;line-height:1.2}
+.grid-dash .stat-hint{font-size:10.5px;line-height:1.3}
+.grid-dash .stat .stat-ico{width:28px;height:28px;border-radius:9px;flex-shrink:0}
+@media (max-width:560px){
+  .grid-dash .stat-val{font-size:16px}
+  .grid-dash .stat-label{font-size:10px}
+}
+.quick-grid{display:grid;gap:10px;grid-template-columns:repeat(3,1fr)}
+@media (min-width:900px){.quick-grid{grid-template-columns:repeat(6,1fr)}}
+.quick-tile{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px 8px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;
+  text-align:center;color:var(--text);font-size:12px;font-weight:600;min-width:0;
+  transition:border-color .2s,transform .2s,background .2s}
+.quick-tile:hover{border-color:var(--border-2);background:var(--card-2);transform:translateY(-1px)}
+.quick-tile:active{transform:scale(.97)}
+.quick-tile .qt-ico{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;
+  justify-content:center;background:var(--green-soft);color:var(--green)}
+.quick-tile .qt-ico svg{width:18px;height:18px}
+.dash-scroll{max-height:300px;overflow-y:auto;padding-right:2px}
+#dashTabs{margin-bottom:12px}
+#dashTabs .tab{padding:8px 12px;font-size:12.5px}
+</style>
+</head>
+<body>
+
+<!-- ========== LOGIN ========== -->
+<div id="loginPage" class="login-wrap">
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="login-logo">
+      <div class="brand-mark">P</div>
+      <div class="brand-text">PEDIA<span> OTP</span></div>
+    </div>
+    <div class="login-sub">Admin Control Panel · Login Terlebih Dahulu</div>
+    <div class="field">
+      <label for="loginPass">Password Admin</label>
+      <div class="input-wrap">
+        <span class="ico">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </span>
+        <input class="input" id="loginPass" type="password" placeholder="••••••••" required />
+        <button type="button" class="toggle-pass" id="togglePass" title="Tampilkan / sembunyikan">
+          <svg id="eyeOpen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg id="eyeOff" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+        </button>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-block" id="loginBtn" type="submit">
+      <span id="loginBtnText">Masuk Dashboard</span>
+    </button>
+    <div class="muted" style="font-size:11.5px;text-align:center;margin-top:16px">
+      &copy; <span id="yearLogin"></span> PEDIA OTP · Semua aktivitas dicatat.
+    </div>
+  </form>
+</div>
+
+<!-- ========== APP ========== -->
+<div id="appPage" class="app hidden">
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <div class="mark">P</div>
+      <div class="name">PEDIA<span> OTP</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="nav-label">Utama</div>
+        <div class="nav-item active" data-page="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+          <span>Dashboard</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Transaksi</div>
+        <div class="nav-item" data-page="orders">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+          <span>Pembelian</span>
+        </div>
+        <div class="nav-item" data-page="deposits">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span>Deposit</span>
+        </div>
+        <div class="nav-item" data-page="withdraw">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span>Withdraw Profit</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Manajemen</div>
+        <div class="nav-item" data-page="users">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+          <span>Daftar User</span>
+        </div>
+        <div class="nav-item" data-page="broadcast">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+          <span>Broadcast</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Sistem</div>
+        <div class="nav-item" data-page="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Pengaturan</span>
+        </div>
+      </div>
+    </nav>
+  </aside>
+
+  <div class="main-wrap">
+    <header class="topbar">
+      <button class="hamburger" id="hamburgerBtn" aria-label="Menu">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <h1 class="page-title" id="pageTitle">Dashboard</h1>
+      <div class="topbar-right">
+        <div class="sys-status" id="sysStatus" title="Status sistem">
+          <span class="dot"></span><span class="label" id="sysStatusLabel">Online</span>
+        </div>
+        <button class="btn btn-ghost btn-icon" id="refreshBtn" title="Refresh">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+        <div class="admin-chip"><div class="av" id="adminAvatar">A</div><span class="name-full" id="adminName">Admin</span></div>
+        <button class="btn btn-danger btn-icon" id="logoutBtn" title="Logout">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<div id="modalRoot" class="modal-root"></div>
+<div id="toasts" class="toasts"></div>
+<div id="loadingOverlay" class="loading-overlay hidden">
+  <div class="box"><span class="spinner" style="color:var(--green)"></span><span id="loadingText">Memproses...</span></div>
+</div>
+
+<script src="env.js"></script>
+<script>
+/* ===================================================================================
+   PEDIA OTP · Admin Dashboard (1 file, tanpa backend)
+   -----------------------------------------------------------------------------------
+   Semua API key/token TIDAK ditaruh di sini lagi — diambil dari file "env.js"
+   (harus ada di folder yang sama dengan index.html). Untuk ganti key, edit env.js,
+   JANGAN edit di sini.
+   =================================================================================== */
+const PEDIA_ENV = window.PEDIA_ENV || {};
+
+/* ============ REFUND KE PROVIDER (saldo API pusat) ============
+   Saat admin klik Refund, sistem WAJIB membatalkan order di website provider (tempat API)
+   dulu. Kalau provider gagal / menolak -> refund dibatalkan total (saldo user TIDAK ditambah),
+   supaya saldo pusat & saldo user selalu sinkron.
+
+   Isi PROVIDER_CANCEL sesuai dokumentasi API provider kamu.
+   Key = isi kolom `server` di tabel otp_orders (ekonomi / premium / khusus), atau '*' untuk semua server.
+   {id} akan diganti otomatis dengan provider_order_id.
+   Contoh:
+   const PROVIDER_CANCEL = {
+     '*': {
+       method: 'GET',                                   // GET / POST
+       url: 'https://DOMAIN-PROVIDER/api/cancel?api_key=ISI_API_KEY&order_id={id}',
+       headers: {},                                     // contoh: { 'Authorization': 'Bearer KEY' }
+       body: null,                                      // POST: string / object, boleh pakai {id}
+       ok: (j) => !!j && (j.success === true || j.status === true || j.status === 'success'),
+     },
+   };
+*/
+const REFUND_REQUIRE_PROVIDER = true;   // true = wajib sukses cancel di provider dulu (disarankan)
+const PROVIDER_CANCEL = {};
+
+/* ============ DEFAULT PASSWORD ADMIN (ganti setelah login pertama) ============ */
+const DEFAULT_PASSWORD = "31faris31";   // <-- bisa diubah manual di sini kalau mau
+
+/* ================================ UTIL ================================ */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const fmtRp  = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+const fmtNum = n => Number(n || 0).toLocaleString('id-ID');
+const fmtDT = (iso) => { if (!iso) return '-'; try { return new Date(iso).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '-'; } };
+const fmtD  = (iso) => { if (!iso) return '-'; try { return new Date(iso).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric' }); } catch { return '-'; } };
+const fmtHM = (iso) => { if (!iso) return '-'; try { return new Date(iso).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' }); } catch { return '-'; } };
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n-1) + '…' : s; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const debounce = (fn, ms = 350) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const initials = (s) => String(s || '?').trim().split(/\s+/).map(x => x[0]).slice(0, 2).join('').toUpperCase();
+async function sha256(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString(); };
+
+/* ================================ STATUS ================================ */
+const STATUS_MAP = {
+  pending:     { label: 'Pending',     cls: 'badge-yellow' },
+  resend_wait: { label: 'Resend Wait', cls: 'badge-yellow' },
+  received:    { label: 'Sukses',      cls: 'badge-green'  },
+  cancelled:   { label: 'Dibatalkan',  cls: 'badge-red'    },
+  expired:     { label: 'Kedaluwarsa', cls: 'badge-gray'   },
+  refunded:    { label: 'Refunded',    cls: 'badge-purple' },
+  paid:        { label: 'Paid',        cls: 'badge-green'  },
+  failed:      { label: 'Gagal',       cls: 'badge-red'    },
+  success:     { label: 'Sukses',      cls: 'badge-green'  },
+  processing:  { label: 'Processing',  cls: 'badge-blue'   },
+};
+const statusBadge = (s) => { const m = STATUS_MAP[s] || { label: s || '-', cls: 'badge-gray' }; return `<span class="badge ${m.cls}"><span class="dot"></span>${escHtml(m.label)}</span>`; };
+const SERVER_LABEL = { ekonomi: '💰 Ekonomi', premium: '👑 Premium', khusus: '⭐ Khusus' };
+
+/* ================================ TOAST ================================ */
+const TOAST_ICON = {
+  success: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  error:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+  warning: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  info:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+};
+function toast(msg, type = 'info', ms = 3600) {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span class="t-ico">${TOAST_ICON[type] || TOAST_ICON.info}</span><span>${escHtml(msg)}</span>`;
+  $('#toasts').appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 350); }, ms);
+}
+const Loading = { _n: 0, show(t = 'Memproses...') { this._n++; $('#loadingText').textContent = t; $('#loadingOverlay').classList.remove('hidden'); },
+  hide() { this._n = Math.max(0, this._n - 1); if (!this._n) $('#loadingOverlay').classList.add('hidden'); } };
+
+/* ================================ MODAL ================================ */
+const Modal = {
+  close() { const r = $('#modalRoot'); r.classList.remove('show'); setTimeout(() => r.innerHTML = '', 200); },
+  open({ title, body, footer, wide = false, onMount }) {
+    const root = $('#modalRoot');
+    root.innerHTML = `<div class="modal ${wide ? 'wide' : ''}">
+      <div class="modal-head"><h3>${title}</h3>
+        <button class="close" data-modal-close><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+      <div class="modal-body">${body}</div>
+      ${footer ? `<div class="modal-foot">${footer}</div>` : ''}
+    </div>`;
+    requestAnimationFrame(() => root.classList.add('show'));
+    root.querySelectorAll('[data-modal-close]').forEach(b => b.onclick = () => Modal.close());
+    root.onclick = (e) => { if (e.target === root) Modal.close(); };
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { Modal.close(); document.removeEventListener('keydown', esc); } });
+    if (onMount) onMount(root.querySelector('.modal'));
+    return root;
+  },
+  confirm({ title = 'Konfirmasi', message, confirmText = 'Ya', cancelText = 'Tidak', danger = false }) {
+    return new Promise(resolve => {
+      Modal.open({
+        title,
+        body: `<div style="font-size:14px;line-height:1.6;color:var(--text)">${message}</div>`,
+        footer: `<button class="btn btn-ghost" data-act="no">${escHtml(cancelText)}</button>
+          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="yes">${escHtml(confirmText)}</button>`,
+        onMount(m) {
+          m.querySelector('[data-act="no"]').onclick = () => { Modal.close(); resolve(false); };
+          m.querySelector('[data-act="yes"]').onclick = () => { Modal.close(); resolve(true); };
+        }
+      });
+    });
+  }
+};
+
+/* ============================ CONFIG CHECK ============================ */
+(function () {
+  $('#yearLogin').textContent = new Date().getFullYear();
+  const missing = [];
+  if (!PEDIA_ENV.SUPABASE_URL) missing.push('SUPABASE_URL');
+  if (!PEDIA_ENV.SUPABASE_KEY) missing.push('SUPABASE_KEY');
+  if (!PEDIA_ENV.BOT_TOKEN) missing.push('BOT_TOKEN');
+  if (missing.length) {
+    setTimeout(() => toast(`Konfigurasi belum lengkap: ${missing.join(', ')}. Isi di PEDIA_ENV.`, 'error', 9000), 400);
+  }
+})();
+
+/* ============================ CLIENTS ============================ */
+const sb = PEDIA_ENV.SUPABASE_URL && PEDIA_ENV.SUPABASE_KEY
+  ? supabase.createClient(PEDIA_ENV.SUPABASE_URL, PEDIA_ENV.SUPABASE_KEY, { auth: { persistSession: false } })
+  : null;
+
+/* ============================ TELEGRAM ============================ */
+async function tgCall(method, payload) {
+  if (!PEDIA_ENV.BOT_TOKEN) throw new Error('BOT_TOKEN belum diisi.');
+  const res = await fetch(`https://api.telegram.org/bot${PEDIA_ENV.BOT_TOKEN}/${method}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => null);
+  if (!data || !data.ok) {
+    const msg = (data && data.description) || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data.result;
+}
+async function tgCallMultipart(method, fields, fileField, file) {
+  if (!PEDIA_ENV.BOT_TOKEN) throw new Error('BOT_TOKEN belum diisi.');
+  const fd = new FormData();
+  Object.entries(fields).forEach(([k, v]) => { if (v !== undefined && v !== null) fd.append(k, v); });
+  fd.append(fileField, file, file.name || 'photo.jpg');
+  const res = await fetch(`https://api.telegram.org/bot${PEDIA_ENV.BOT_TOKEN}/${method}`, { method: 'POST', body: fd });
+  const data = await res.json().catch(() => null);
+  if (!data || !data.ok) {
+    const msg = (data && data.description) || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data.result;
+}
+
+/* ============================ DOKU (opsional) ============================ */
+async function dokuCall(path, body) {
+  if (!PEDIA_ENV.DOKU_CLIENT_ID || !PEDIA_ENV.DOKU_SECRET_KEY) throw new Error('Doku belum dikonfigurasi.');
+  const res = await fetch(PEDIA_ENV.DOKU_BASE_URL + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Client-Id': PEDIA_ENV.DOKU_CLIENT_ID, Authorization: `Bearer ${PEDIA_ENV.DOKU_SECRET_KEY}` },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) throw new Error((data && data.message) || `Doku HTTP ${res.status}`);
+  return data;
+}
+
+/* ============================ AUTH ============================ */
+const Auth = {
+  KEY: 'pedia_admin_v1',
+  get() { try { return JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch { return null; } },
+  set(s) { if (s) localStorage.setItem(this.KEY, JSON.stringify(s)); else localStorage.removeItem(this.KEY); },
+  isLoggedIn() {
+    const s = this.get();
+    if (!s || !s.exp || Date.now() > s.exp) return false;
+    return true;
+  },
+  async getStoredHash() {
+    if (!sb) return null;
+    try {
+      const { data } = await sb.from('otp_settings').select('value').eq('key', 'admin_password_hash').maybeSingle();
+      return data && data.value ? data.value : null;
+    } catch { return null; }
+  },
+  async login(password) {
+    if (!sb) throw new Error('Supabase belum dikonfigurasi.');
+    const stored = await this.getStoredHash();
+    if (!stored) {
+      // Login pertama kali: pakai DEFAULT_PASSWORD, lalu simpan hash-nya
+      if (password !== DEFAULT_PASSWORD) throw new Error('Password salah.');
+      const h = await sha256(password);
+      const { error } = await sb.from('otp_settings').upsert({ key: 'admin_password_hash', value: h }, { onConflict: 'key' });
+      if (error) throw new Error('Gagal menyimpan hash password: ' + error.message);
+    } else {
+      const h = await sha256(password);
+      if (h !== stored) throw new Error('Password salah.');
+    }
+    const session = { name: 'Admin', loginAt: Date.now(), exp: Date.now() + 12 * 3600 * 1000 };
+    this.set(session);
+    return session;
+  },
+  async changePassword(oldPw, newPw) {
+    if (!sb) throw new Error('Supabase belum dikonfigurasi.');
+    const stored = await this.getStoredHash();
+    const oldH = await sha256(oldPw);
+    if (stored) { if (oldH !== stored) throw new Error('Password lama salah.'); }
+    else if (oldPw !== DEFAULT_PASSWORD) throw new Error('Password lama salah.');
+    const newH = await sha256(newPw);
+    const { error } = await sb.from('otp_settings').upsert({ key: 'admin_password_hash', value: newH }, { onConflict: 'key' });
+    if (error) throw new Error(error.message);
+  },
+  logout() { this.set(null); location.reload(); }
+};
+
+/* ============================ APP STATE ============================ */
+const App = { currentPage: 'dashboard', charts: {}, realtime: null };
+
+/* ============================ NAV ============================ */
+const PAGES = {
+  dashboard: { title: 'Dashboard',            render: renderDashboard },
+  orders:    { title: 'Transaksi Pembelian',  render: renderOrders },
+  deposits:  { title: 'Transaksi Deposit',    render: renderDeposits },
+  users:     { title: 'Daftar User',          render: renderUsers },
+  withdraw:  { title: 'Withdraw / WD Profit', render: renderWithdraw },
+  broadcast: { title: 'Broadcast',            render: renderBroadcast },
+  settings:  { title: 'Pengaturan',           render: renderSettings },
+};
+function navigate(page) {
+  if (!PAGES[page]) page = 'dashboard';
+  App.currentPage = page;
+  $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
+  $('#pageTitle').textContent = PAGES[page].title;
+  document.title = `${PAGES[page].title} · PEDIA OTP Admin`;
+  closeSidebar();
+  destroyCharts();
+  if (App.realtime) { try { sb.removeChannel(App.realtime); } catch {} App.realtime = null; }
+  $('#content').innerHTML = `<div class="grid-dash">${Array(6).fill('<div class="stat"><div class="skeleton sk-line" style="width:60%"></div><div class="skeleton sk-line" style="width:85%;height:22px"></div></div>').join('')}</div>`;
+  PAGES[page].render().catch(err => {
+    console.error(err);
+    $('#content').innerHTML = `<div class="card"><div class="empty"><p><b>Gagal memuat halaman</b></p><p class="muted" style="font-size:12px;margin-top:4px">${escHtml(err.message || 'Terjadi kesalahan')}</p></div></div>`;
+  });
+}
+function destroyCharts() { Object.values(App.charts).forEach(c => { try { c.destroy(); } catch {} }); App.charts = {}; }
+function openSidebar() { $('#sidebar').classList.add('open'); $('#sidebarBackdrop').classList.add('show'); }
+function closeSidebar() { $('#sidebar').classList.remove('open'); $('#sidebarBackdrop').classList.remove('show'); }
+
+/* ============================ HELPERS ============================ */
+function emptyState(text = 'Belum ada data') {
+  return `<div class="empty"><svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><p>${escHtml(text)}</p></div>`;
+}
+function statCard({ label, value, hint, ico }) {
+  return `<div class="stat">
+    <div class="flex" style="justify-content:space-between;align-items:flex-start">
+      <div class="stat-label">${escHtml(label)}</div>
+      ${ico ? `<div class="stat-ico">${ico}</div>` : ''}
+    </div>
+    <div class="stat-val">${value}</div>
+    ${hint ? `<div class="stat-hint">${hint}</div>` : ''}
+  </div>`;
+}
+async function withBtn(btn, fn, loadingText) {
+  if (!btn || btn.disabled) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span><span>${escHtml(loadingText || 'Memproses')}</span>`;
+  try { return await fn(); } finally { btn.disabled = false; btn.innerHTML = orig; }
+}
+function renderPager(container, totalPages, current, onGo) {
+  const arr = []; const win = 2;
+  let start = Math.max(1, current - win), end = Math.min(totalPages, current + win);
+  if (start > 1) { arr.push(1); if (start > 2) arr.push('...'); }
+  for (let i = start; i <= end; i++) arr.push(i);
+  if (end < totalPages) { if (end < totalPages - 1) arr.push('...'); arr.push(totalPages); }
+  container.innerHTML = `<div class="pg-info">Halaman ${current} dari ${totalPages}</div>
+    <button ${current <= 1 ? 'disabled' : ''} data-go="prev">‹ Prev</button>
+    ${arr.map(p => p === '...' ? `<button disabled>…</button>` : `<button class="${p === current ? 'active' : ''}" data-go="${p}">${p}</button>`).join('')}
+    <button ${current >= totalPages ? 'disabled' : ''} data-go="next">Next ›</button>`;
+  container.querySelectorAll('[data-go]').forEach(b => b.onclick = () => {
+    const g = b.dataset.go;
+    if (g === 'prev') onGo(current - 1);
+    else if (g === 'next') onGo(current + 1);
+    else onGo(Number(g));
+  });
+}
+
+/* ============================ SETTINGS CACHE ============================ */
+async function getSettingsMap() {
+  if (!sb) return {};
+  const { data } = await sb.from('otp_settings').select('key,value');
+  const m = {}; (data || []).forEach(r => { m[r.key] = r.value; });
+  return m;
+}
+
+/* ============================ 1. DASHBOARD ============================ */
+async function renderDashboard() {
+  if (!sb) throw new Error('Supabase belum dikonfigurasi.');
+  const today = startOfToday();
+  const sevenDaysAgo = new Date(Date.now() - 6 * 24 * 3600 * 1000); sevenDaysAgo.setHours(0,0,0,0);
+
+  const [ordersRes, usersRes, depositsRes, recentOrders, recentDeposits, recentUsers] = await Promise.all([
+    sb.from('otp_orders').select('id,status,harga_jual,harga_modal,created_at').gte('created_at', sevenDaysAgo.toISOString()),
+    sb.from('otp_users').select('id', { count: 'exact', head: true }),
+    sb.from('otp_deposits').select('id,status,nominal,created_at').gte('created_at', sevenDaysAgo.toISOString()),
+    sb.from('otp_orders').select('id,user_id,service_name,service_code,phone_number,harga_jual,status,created_at').order('created_at', { ascending: false }).limit(6),
+    sb.from('otp_deposits').select('id,user_id,invoice_id,nominal,status,created_at').order('created_at', { ascending: false }).limit(6),
+    sb.from('otp_users').select('id,first_name,last_name,username,saldo,created_at').order('created_at', { ascending: false }).limit(6),
+  ]);
+
+  const orders = ordersRes.data || [];
+  const deposits = depositsRes.data || [];
+
+  const isSuccess = (s) => s === 'received';
+  const successOrders = orders.filter(o => isSuccess(o.status));
+  const todayOrders = successOrders.filter(o => o.created_at >= today);
+  const todaySales = todayOrders.reduce((a, o) => a + Number(o.harga_jual || 0), 0);
+  const totalSales = successOrders.reduce((a, o) => a + Number(o.harga_jual || 0), 0);
+  const todayItems = todayOrders.length;
+  const todayProfit = todayOrders.reduce((a, o) => a + (Number(o.harga_jual || 0) - Number(o.harga_modal || 0)), 0);
+  const totalProfit = successOrders.reduce((a, o) => a + (Number(o.harga_jual || 0) - Number(o.harga_modal || 0)), 0);
+  const totalUsers = usersRes.count || 0;
+
+  // 7 hari chart
+  const dayKeys = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - i);
+    dayKeys.push(d.toISOString().slice(0, 10));
+  }
+  const bucket = (arr, mapFn) => { const m = {}; dayKeys.forEach(k => m[k] = 0); arr.forEach(o => { const k = String(o.created_at).slice(0, 10); if (m[k] !== undefined) m[k] += mapFn(o); }); return dayKeys.map(k => m[k]); };
+  const sales7 = bucket(successOrders, o => Number(o.harga_jual || 0));
+  const profit7 = bucket(successOrders, o => Number(o.harga_jual || 0) - Number(o.harga_modal || 0));
+  const orders7 = bucket(successOrders, () => 1);
+  const deposits7 = bucket(deposits.filter(d => d.status === 'paid'), d => Number(d.nominal || 0));
+
+  const pendingOrders = (recentOrders.data || []).filter(o => o.status === 'pending' || o.status === 'resend_wait');
+  const problemOrders = (recentOrders.data || []).filter(o => ['cancelled','expired','refunded'].includes(o.status));
+
+  const qi = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const quickTiles = [
+    { page: 'orders',    label: 'Pembelian',       ico: qi('<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>') },
+    { page: 'deposits',  label: 'Deposit',         ico: qi('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>') },
+    { page: 'users',     label: 'Daftar User',     ico: qi('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>') },
+    { page: 'withdraw',  label: 'Withdraw',        ico: qi('<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>') },
+    { page: 'broadcast', label: 'Broadcast',       ico: qi('<path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>') },
+    { page: 'settings',  label: 'Pengaturan',      ico: qi('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>') },
+  ];
+
+  const orderRow = (o) => `<div class="list-row">
+            <div class="lr-main"><div class="lr-title">#${o.id} · ${escHtml(clip(o.service_name || o.service_code, 22))}</div>
+              <div class="lr-sub">${escHtml(o.phone_number || '-')} · ${fmtDT(o.created_at)}</div></div>
+            <div class="lr-right"><div style="font-weight:700">${fmtRp(o.harga_jual)}</div><div class="mt-1">${statusBadge(o.status)}</div></div>
+          </div>`;
+  const depositRow = (d) => `<div class="list-row">
+            <div class="lr-main"><div class="lr-title">${escHtml(clip(d.invoice_id, 22))}</div>
+              <div class="lr-sub">User ${d.user_id} · ${fmtDT(d.created_at)}</div></div>
+            <div class="lr-right"><div style="font-weight:700;color:var(--green)">${fmtRp(d.nominal)}</div><div class="mt-1">${statusBadge(d.status)}</div></div>
+          </div>`;
+  const pendingRow = (o) => `<div class="list-row">
+            <div class="lr-main"><div class="lr-title">#${o.id} · ${escHtml(clip(o.service_name || o.service_code, 22))}</div>
+              <div class="lr-sub">${escHtml(o.phone_number || '-')} · ${fmtHM(o.created_at)} WIB</div></div>
+            <div class="lr-right">${statusBadge(o.status)}</div>
+          </div>`;
+  const problemRow = (o) => `<div class="list-row">
+            <div class="lr-main"><div class="lr-title">#${o.id} · ${escHtml(clip(o.service_name || o.service_code, 22))}</div>
+              <div class="lr-sub">${escHtml(o.phone_number || '-')} · ${fmtDT(o.created_at)}</div></div>
+            <div class="lr-right">${statusBadge(o.status)}</div>
+          </div>`;
+  const userRow = (u) => `<div class="list-row">
+          <div class="lr-main"><div class="lr-title">${escHtml([u.first_name, u.last_name].filter(Boolean).join(' ') || 'User')}</div>
+            <div class="lr-sub">ID ${u.id}${u.username ? ' · @' + escHtml(u.username) : ''}</div></div>
+          <div class="lr-right" style="font-weight:700;color:var(--green)">${fmtRp(u.saldo)}</div>
+        </div>`;
+
+  const c = $('#content');
+  c.innerHTML = `
+    <div class="grid-dash">
+      ${statCard({ label: 'Penjualan Hari Ini', value: fmtRp(todaySales), hint: `WIB · ${new Date().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })}`, ico: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>' })}
+      ${statCard({ label: 'Total Penjualan', value: fmtRp(totalSales), hint: '7 hari terakhir', ico: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>' })}
+      ${statCard({ label: 'Item Terjual Hari Ini', value: fmtNum(todayItems), hint: 'Order sukses', ico: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>' })}
+      ${statCard({ label: 'Profit Hari Ini', value: fmtRp(todayProfit), hint: 'Harga jual − modal', ico: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 0 0 0 4h4a2 2 0 0 1 0 4H8"/><path d="M12 6v2m0 8v2"/></svg>' })}
+      ${statCard({ label: 'Total Profit', value: fmtRp(totalProfit), hint: '7 hari terakhir', ico: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>' })}
+      ${statCard({ label: 'Total User', value: fmtNum(totalUsers), hint: 'Terdaftar di bot', ico: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>' })}
+    </div>
+
+    <div class="section mt-2">
+      <h3 class="section-title">Menu Cepat</h3>
+      <div class="quick-grid">
+        ${quickTiles.map(t => `<div class="quick-tile" data-go="${t.page}"><div class="qt-ico">${t.ico}</div><span>${escHtml(t.label)}</span></div>`).join('')}
+      </div>
+    </div>
+
+    <div class="section">
+      <h3 class="section-title">Grafik 7 Hari Terakhir</h3>
+      <div class="grid grid-2">
+        <div class="card"><div class="card-h"><h4 class="card-title">Penjualan & Profit</h4></div>
+          <div class="chart-box"><canvas id="chartSales"></canvas></div>
+          <div style="display:flex;gap:14px;font-size:12px;color:var(--text-2);margin-top:10px">
+            <span>● <span style="color:#10b981">Penjualan</span></span>
+            <span>● <span style="color:#f59e0b">Profit</span></span>
+          </div>
+        </div>
+        <div class="card"><div class="card-h"><h4 class="card-title">Order & Deposit</h4></div>
+          <div class="chart-box"><canvas id="chartOrders"></canvas></div>
+          <div style="display:flex;gap:14px;font-size:12px;color:var(--text-2);margin-top:10px">
+            <span>● <span style="color:#3b82f6">Order Sukses</span></span>
+            <span>● <span style="color:#a78bfa">Deposit Paid</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3 class="section-title">Aktivitas Terbaru</h3>
+      <div class="card">
+        <div class="tabs" id="dashTabs">
+          <button class="tab active" data-p="ord">Order</button>
+          <button class="tab" data-p="dep">Deposit</button>
+          <button class="tab" data-p="pen">Pending (${pendingOrders.length})</button>
+          <button class="tab" data-p="prb">Bermasalah (${problemOrders.length})</button>
+          <button class="tab" data-p="usr">User</button>
+        </div>
+        <div class="list-rows dash-scroll dash-panel" data-p="ord">${(recentOrders.data || []).map(orderRow).join('') || emptyState('Belum ada order')}</div>
+        <div class="list-rows dash-scroll dash-panel hidden" data-p="dep">${(recentDeposits.data || []).map(depositRow).join('') || emptyState('Belum ada deposit')}</div>
+        <div class="list-rows dash-scroll dash-panel hidden" data-p="pen">${pendingOrders.map(pendingRow).join('') || emptyState('Tidak ada order pending')}</div>
+        <div class="list-rows dash-scroll dash-panel hidden" data-p="prb">${problemOrders.map(problemRow).join('') || emptyState('Tidak ada order bermasalah')}</div>
+        <div class="list-rows dash-scroll dash-panel hidden" data-p="usr">${(recentUsers.data || []).map(userRow).join('') || emptyState('Belum ada user')}</div>
+      </div>
+    </div>
+  `;
+
+  $$('#dashTabs .tab').forEach(tb => tb.onclick = () => {
+    $$('#dashTabs .tab').forEach(x => x.classList.toggle('active', x === tb));
+    $$('.dash-panel').forEach(pn => pn.classList.toggle('hidden', pn.dataset.p !== tb.dataset.p));
+  });
+  $$('.quick-tile').forEach(t => t.onclick = () => navigate(t.dataset.go));
+
+  const labels = dayKeys.map(k => { const [y,m,d] = k.split('-'); return new Date(y, m-1, d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }); });
+  const gridC = 'rgba(255,255,255,.05)', tickC = '#6b7c73';
+  const baseOpts = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0d1210', borderColor: '#1e2a24', borderWidth: 1, titleColor: '#e6f1ec', bodyColor: '#a8b8b0', padding: 10, cornerRadius: 8 } },
+    scales: { x: { grid: { color: gridC }, ticks: { color: tickC, font: { size: 11 } } },
+      y: { grid: { color: gridC }, ticks: { color: tickC, font: { size: 11 }, callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'jt' : v >= 1000 ? (v/1000)+'rb' : v } } }
+  };
+  if ($('#chartSales')) App.charts.sales = new Chart($('#chartSales'), { type: 'line', data: { labels,
+    datasets: [
+      { label: 'Penjualan', data: sales7, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', tension: .35, borderWidth: 2.5, fill: true, pointRadius: 3, pointBackgroundColor: '#10b981' },
+      { label: 'Profit', data: profit7, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.10)', tension: .35, borderWidth: 2.5, fill: true, pointRadius: 3, pointBackgroundColor: '#f59e0b' },
+    ] }, options: baseOpts });
+  if ($('#chartOrders')) App.charts.orders = new Chart($('#chartOrders'), { type: 'bar', data: { labels,
+    datasets: [
+      { label: 'Order', data: orders7, backgroundColor: 'rgba(59,130,246,.65)', borderRadius: 6, maxBarThickness: 26 },
+      { label: 'Deposit', data: deposits7, backgroundColor: 'rgba(167,139,250,.65)', borderRadius: 6, maxBarThickness: 26 },
+    ] }, options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, beginAtZero: true, ticks: { ...baseOpts.scales.y.ticks, callback: v => v } } } } });
+}
+
+/* ============================ 2. TRANSAKSI PEMBELIAN ============================ */
+const OrdersState = { page: 1, per: 20, q: '', status: '', server: '', from: '', to: '' };
+
+async function renderOrders() {
+  const c = $('#content');
+  c.innerHTML = `
+    <div class="card">
+      <div class="tools">
+        <input class="input input-search" id="fOrdQ" placeholder="Cari ID / nomor / provider / user id..." />
+        <select class="select" id="fOrdStatus">
+          <option value="">Semua Status</option>
+          <option value="pending">Pending</option><option value="resend_wait">Resend Wait</option>
+          <option value="received">Sukses</option><option value="cancelled">Dibatalkan</option>
+          <option value="expired">Kedaluwarsa</option><option value="refunded">Refunded</option>
+        </select>
+        <select class="select" id="fOrdServer">
+          <option value="">Semua Server</option>
+          <option value="ekonomi">Ekonomi</option><option value="premium">Premium</option><option value="khusus">Khusus</option>
+        </select>
+        <input class="input" type="date" id="fOrdFrom" />
+        <input class="input" type="date" id="fOrdTo" />
+        <button class="btn btn-ghost btn-sm" id="fOrdReset">Reset</button>
+      </div>
+      <div id="ordersTbl"></div>
+      <div id="ordersPager" class="pagination"></div>
+    </div>`;
+  const load = debounce(async () => {
+    OrdersState.q = $('#fOrdQ').value.trim();
+    OrdersState.status = $('#fOrdStatus').value;
+    OrdersState.server = $('#fOrdServer').value;
+    OrdersState.from = $('#fOrdFrom').value;
+    OrdersState.to = $('#fOrdTo').value;
+    OrdersState.page = 1;
+    await loadOrders();
+  }, 400);
+  $('#fOrdQ').oninput = load; $('#fOrdStatus').onchange = load; $('#fOrdServer').onchange = load;
+  $('#fOrdFrom').onchange = load; $('#fOrdTo').onchange = load;
+  $('#fOrdReset').onclick = () => {
+    $('#fOrdQ').value=''; $('#fOrdStatus').value=''; $('#fOrdServer').value=''; $('#fOrdFrom').value=''; $('#fOrdTo').value='';
+    Object.assign(OrdersState, { q:'', status:'', server:'', from:'', to:'', page:1 });
+    loadOrders();
+  };
+  await loadOrders();
+}
+
+async function loadOrders() {
+  const box = $('#ordersTbl'), pager = $('#ordersPager');
+  box.innerHTML = `<div class="skeleton sk-block" style="margin:14px"></div>`;
+  pager.innerHTML = '';
+  try {
+    const from = (OrdersState.page - 1) * OrdersState.per;
+    const to = from + OrdersState.per - 1;
+    let q = sb.from('otp_orders').select('*', { count: 'exact' });
+    if (OrdersState.status) q = q.eq('status', OrdersState.status);
+    if (OrdersState.server) q = q.eq('server', OrdersState.server);
+    if (OrdersState.from) q = q.gte('created_at', new Date(OrdersState.from).toISOString());
+    if (OrdersState.to) { const t = new Date(OrdersState.to); t.setHours(23,59,59,999); q = q.lte('created_at', t.toISOString()); }
+    if (OrdersState.q) {
+      const kw = OrdersState.q.replace(/[%_]/g, '');
+      const numeric = /^\d+$/.test(kw);
+      const ors = [`phone_number.ilike.%${kw}%`, `provider_order_id.ilike.%${kw}%`, `service_name.ilike.%${kw}%`, `service_code.ilike.%${kw}%`];
+      if (numeric) { ors.push(`id.eq.${kw}`, `user_id.eq.${kw}`); }
+      q = q.or(ors.join(','));
+    }
+    q = q.order('created_at', { ascending: false }).range(from, to);
+    const { data: rows, error, count } = await q;
+    if (error) throw error;
+    const total = count || 0;
+    const per = OrdersState.per;
+    const totalPages = Math.max(1, Math.ceil(total / per));
+    if (!rows || !rows.length) { box.innerHTML = emptyState('Tidak ada transaksi yang cocok'); return; }
+
+    // fetch user info
+    const userIds = [...new Set(rows.map(r => r.user_id).filter(Boolean))];
+    const usersMap = {};
+    if (userIds.length) {
+      const { data: us } = await sb.from('otp_users').select('id,first_name,last_name,username').in('id', userIds);
+      (us || []).forEach(u => usersMap[u.id] = u);
+    }
+
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>ID</th><th>Provider</th><th>User</th><th>Layanan</th><th>Server</th><th>Nomor</th>
+      <th class="right">Modal</th><th class="right">Jual</th><th class="right">Profit</th><th>Status</th><th>Waktu</th><th></th></tr></thead>
+      <tbody>${rows.map(r => {
+        const u = usersMap[r.user_id] || {};
+        const profit = Number(r.harga_jual || 0) - Number(r.harga_modal || 0);
+        const profitCls = profit > 0 ? 'color:var(--green)' : profit < 0 ? 'color:var(--red)' : '';
+        const canRefund = ['pending','resend_wait'].includes(r.status);
+        return `<tr>
+          <td class="mono">#${r.id}</td>
+          <td class="mono muted">${escHtml(r.provider_order_id || '-')}</td>
+          <td><div style="font-weight:600">${escHtml([u.first_name,u.last_name].filter(Boolean).join(' ') || 'User')}</div><div class="muted" style="font-size:11px">${escHtml(r.user_id)}</div></td>
+          <td>${escHtml(clip(r.service_name || r.service_code, 22))}</td>
+          <td>${escHtml((SERVER_LABEL[r.server] || r.server || '-').replace(/[^A-Za-z ]/g,'').trim())}</td>
+          <td class="mono">${escHtml(r.phone_number || '-')}</td>
+          <td class="right">${fmtRp(r.harga_modal)}</td>
+          <td class="right" style="font-weight:700">${fmtRp(r.harga_jual)}</td>
+          <td class="right" style="${profitCls};font-weight:700">${fmtRp(profit)}</td>
+          <td>${statusBadge(r.status)}</td>
+          <td class="muted" style="font-size:12px">${fmtDT(r.created_at)}</td>
+          <td><div class="flex">
+            <button class="btn btn-ghost btn-xs" data-odetail="${r.id}">Detail</button>
+            ${canRefund ? `<button class="btn btn-danger btn-xs" data-orefund="${r.id}">Refund</button>` : ''}
+          </div></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+
+    box.querySelectorAll('[data-odetail]').forEach(b => b.onclick = () => showOrderDetail(Number(b.dataset.odetail)));
+    box.querySelectorAll('[data-orefund]').forEach(b => b.onclick = () => doRefund(Number(b.dataset.orefund), b));
+    renderPager(pager, totalPages, OrdersState.page, p => { OrdersState.page = p; loadOrders(); });
+  } catch (e) {
+    box.innerHTML = emptyState(e.message || 'Gagal memuat data');
+  }
+}
+
+async function showOrderDetail(id) {
+  Modal.open({ title: `Detail Order #${id}`, body: `<div class="skeleton sk-block"></div>` });
+  try {
+    const { data: o, error } = await sb.from('otp_orders').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!o) throw new Error('Order tidak ditemukan.');
+    const { data: u } = await sb.from('otp_users').select('*').eq('id', o.user_id).maybeSingle();
+    const profit = Number(o.harga_jual || 0) - Number(o.harga_modal || 0);
+    Modal.open({
+      title: `Detail Order #${o.id}`, wide: true,
+      body: `
+        <div class="section"><h4 class="section-title">Transaksi</h4>
+          <div class="dt">
+            <div class="row"><span class="lbl">Order ID</span><span class="val mono">#${o.id}</span></div>
+            <div class="row"><span class="lbl">Provider Order ID</span><span class="val mono">${escHtml(o.provider_order_id || '-')}</span></div>
+            <div class="row"><span class="lbl">Layanan</span><span class="val">${escHtml(o.service_name || o.service_code || '-')}</span></div>
+            <div class="row"><span class="lbl">Server</span><span class="val">${escHtml(SERVER_LABEL[o.server] || o.server || '-')}</span></div>
+            <div class="row"><span class="lbl">Nomor</span><span class="val mono">${escHtml(o.phone_number || '-')}</span></div>
+            <div class="row"><span class="lbl">Status</span><span class="val">${statusBadge(o.status)}</span></div>
+            <div class="row"><span class="lbl">Harga Modal</span><span class="val">${fmtRp(o.harga_modal)}</span></div>
+            <div class="row"><span class="lbl">Harga Jual</span><span class="val" style="color:var(--green)">${fmtRp(o.harga_jual)}</span></div>
+            <div class="row"><span class="lbl">Profit</span><span class="val" style="color:${profit>=0?'var(--green)':'var(--red)'}">${fmtRp(profit)}</span></div>
+            <div class="row"><span class="lbl">Resend</span><span class="val">${o.resend_used ? 'Sudah' : 'Belum'}</span></div>
+            <div class="row"><span class="lbl">Dibuat</span><span class="val">${fmtDT(o.created_at)}</span></div>
+            <div class="row"><span class="lbl">Diperbarui</span><span class="val">${fmtDT(o.updated_at)}</span></div>
+          </div>
+          ${o.otp_code || o.otp_code_2 ? `<h4 class="section-title">Kode OTP</h4>
+            <div class="dt">
+              ${o.otp_code ? `<div class="row"><span class="lbl">OTP #1</span><span class="val mono" style="color:var(--green);font-size:15px">${escHtml(o.otp_code)}</span></div>` : ''}
+              ${o.otp_code_2 ? `<div class="row"><span class="lbl">OTP #2</span><span class="val mono" style="color:var(--green);font-size:15px">${escHtml(o.otp_code_2)}</span></div>` : ''}
+            </div>
+            ${o.full_sms ? `<div class="preview" style="margin-top:6px">${escHtml(o.full_sms)}</div>` : ''}` : ''}
+        </div>
+        <div class="section"><h4 class="section-title">User</h4>
+          <div class="dt">
+            <div class="row"><span class="lbl">User ID</span><span class="val mono">${escHtml(u ? u.id : '-')}</span></div>
+            <div class="row"><span class="lbl">Username</span><span class="val">${u && u.username ? '@'+escHtml(u.username) : '-'}</span></div>
+            <div class="row"><span class="lbl">Nama</span><span class="val">${escHtml(u ? [u.first_name,u.last_name].filter(Boolean).join(' ') : '-')}</span></div>
+            <div class="row"><span class="lbl">Saldo</span><span class="val">${fmtRp(u ? u.saldo : 0)}</span></div>
+          </div>
+        </div>`,
+      footer: `<button class="btn btn-ghost" onclick="Modal.close()">Tutup</button>`,
+    });
+  } catch (e) {
+    Modal.open({ title: 'Gagal', body: `<div class="empty"><p>${escHtml(e.message)}</p></div>`, footer: `<button class="btn btn-ghost" onclick="Modal.close()">Tutup</button>` });
+  }
+}
+
+function fillTpl(v, id) {
+  if (typeof v === 'string') return v.replace(/\{id\}/g, id);
+  if (Array.isArray(v)) return v.map(x => fillTpl(x, id));
+  if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = fillTpl(v[k], id); }); return o; }
+  return v;
+}
+
+// Batalkan order di provider (website pusat). Throw error kalau gagal -> refund dihentikan.
+async function cancelAtProvider(o) {
+  const pid = String(o.provider_order_id || '').trim();
+  if (!pid) return { skipped: true, note: 'order tidak punya provider order id' };
+  const cfg = PROVIDER_CANCEL[o.server] || PROVIDER_CANCEL['*'];
+  if (!cfg || !cfg.url) {
+    if (REFUND_REQUIRE_PROVIDER) {
+      throw new Error('Refund dihentikan: API cancel provider untuk server "' + (o.server || '-') + '" belum diisi (PROVIDER_CANCEL di index.html). Saldo user & saldo provider belum diubah.');
+    }
+    return { skipped: true, note: 'API cancel provider belum diisi' };
+  }
+  const method = String(cfg.method || 'GET').toUpperCase();
+  const init = { method, headers: fillTpl(cfg.headers || {}, pid) };
+  if (method !== 'GET' && method !== 'HEAD' && cfg.body != null) {
+    init.body = typeof cfg.body === 'string' ? fillTpl(cfg.body, pid) : JSON.stringify(fillTpl(cfg.body, pid));
+    if (typeof cfg.body !== 'string' && !init.headers['Content-Type']) init.headers['Content-Type'] = 'application/json';
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  init.signal = ctrl.signal;
+  let res, text = '';
+  try {
+    res = await fetch(fillTpl(cfg.url, encodeURIComponent(pid)), init);
+    text = await res.text();
+  } catch (e) {
+    throw new Error(e && e.name === 'AbortError'
+      ? 'Provider tidak merespons (timeout). Refund dibatalkan, saldo tidak diubah.'
+      : 'Gagal menghubungi provider (' + ((e && e.message) || 'jaringan/CORS') + '). Refund dibatalkan, saldo tidak diubah.');
+  } finally { clearTimeout(timer); }
+  let j = null; try { j = JSON.parse(text); } catch {}
+  let okFlag = false;
+  try {
+    okFlag = typeof cfg.ok === 'function'
+      ? !!cfg.ok(j, res)
+      : !!(res.ok && j && (j.success === true || j.status === true || String(j.status).toLowerCase() === 'success'));
+  } catch { okFlag = false; }
+  if (!okFlag) {
+    const msg = (j && (j.message || j.msg || j.error)) || String(text || '').slice(0, 140) || ('HTTP ' + res.status);
+    throw new Error('Provider menolak cancel: ' + msg + '. Refund dibatalkan, saldo tidak diubah.');
+  }
+  return { ok: true };
+}
+
+async function doRefund(id, btn) {
+  const ok = await Modal.confirm({
+    title: 'Konfirmasi Refund',
+    message: `Yakin ingin refund transaksi <b>#${id}</b>?<br><br>Order akan dibatalkan dulu di <b>provider (API pusat)</b> agar saldo pusat kembali. Kalau provider sukses, saldo <b>harga jual</b> dikembalikan ke user dan status menjadi <b>refunded</b>. Kalau provider gagal, semuanya dibatalkan.`,
+    confirmText: 'Ya, Refund', danger: true,
+  });
+  if (!ok) return;
+  await withBtn(btn, async () => {
+    try {
+      // Ambil order
+      const { data: o, error: e1 } = await sb.from('otp_orders').select('*').eq('id', id).maybeSingle();
+      if (e1) throw e1;
+      if (!o) throw new Error('Order tidak ditemukan.');
+      if (!['pending','resend_wait'].includes(o.status)) throw new Error('Order ini tidak bisa direfund (status: ' + o.status + ').');
+
+      // Anti double refund: update dulu jadi refunded (kondisi status lama)
+      const { data: upd, error: e2 } = await sb.from('otp_orders')
+        .update({ status: 'refunded', updated_at: new Date().toISOString() })
+        .eq('id', id).in('status', ['pending','resend_wait']).select().maybeSingle();
+      if (e2) throw e2;
+      if (!upd) throw new Error('Refund gagal: status sudah berubah / mungkin sudah direfund.');
+
+      const prevStatus = o.status;
+      const rollback = async () => { try { await sb.from('otp_orders').update({ status: prevStatus }).eq('id', id); } catch {} };
+
+      // LANGKAH 1: batalkan di provider (saldo pusat). Gagal -> rollback, saldo user tidak disentuh.
+      let prov;
+      try { prov = await cancelAtProvider(o); }
+      catch (pe) { await rollback(); throw pe; }
+
+      // LANGKAH 2: kembalikan saldo user (RPC otp_credit yang dipakai bot)
+      const amount = Number(o.harga_jual) || 0;
+      let e3 = null;
+      for (let i = 0; i < 2; i++) {
+        const r = await sb.rpc('otp_credit', { p_user: o.user_id, p_amount: amount });
+        e3 = r.error;
+        if (!e3) break;
+        await sleep(600);
+      }
+      if (e3) {
+        await rollback();
+        throw new Error('Order sudah dibatalkan di provider, tapi gagal menambah saldo user: ' + e3.message + '. Tambahkan manual ' + fmtRp(amount) + ' lewat menu Daftar User (+ Saldo) ke user ' + o.user_id + '.');
+      }
+      const { data: u } = await sb.from('otp_users').select('saldo').eq('id', o.user_id).maybeSingle();
+      toast(`Refund berhasil${prov && prov.ok ? ' (provider ikut dibatalkan)' : ''}. Saldo user sekarang ${fmtRp(u ? u.saldo : 0)}.`, 'success', 5500);
+      await loadOrders();
+    } catch (e) {
+      toast(e.message || 'Gagal refund', 'error', 8000);
+    }
+  }, 'Memproses');
+}
+
+/* ============================ 3. DEPOSIT ============================ */
+const DepState = { page: 1, per: 20, q: '', status: '', from: '', to: '' };
+
+async function renderDeposits() {
+  const c = $('#content');
+  c.innerHTML = `
+    <div class="grid-dash mb-2">
+      <div class="stat"><div class="stat-label">Deposit Hari Ini</div><div class="stat-val" id="dToday">—</div></div>
+      <div class="stat"><div class="stat-label">Total (7 hari)</div><div class="stat-val" id="dTotal">—</div></div>
+      <div class="stat"><div class="stat-label">Pending</div><div class="stat-val" id="dPend">—</div></div>
+      <div class="stat"><div class="stat-label">Berhasil</div><div class="stat-val" id="dPaid">—</div></div>
+      <div class="stat"><div class="stat-label">Gagal / Expired</div><div class="stat-val" id="dFail">—</div></div>
+      <div class="stat"><div class="stat-label">Transaksi</div><div class="stat-val" id="dCount">—</div></div>
+    </div>
+    <div class="card">
+      <div class="tools">
+        <input class="input input-search" id="fDepQ" placeholder="Cari invoice / user id..." />
+        <select class="select" id="fDepStatus">
+          <option value="">Semua Status</option>
+          <option value="pending">Pending</option><option value="paid">Paid</option>
+          <option value="expired">Expired</option><option value="cancelled">Cancelled</option>
+          <option value="failed">Failed</option>
+        </select>
+        <input class="input" type="date" id="fDepFrom" />
+        <input class="input" type="date" id="fDepTo" />
+        <button class="btn btn-ghost btn-sm" id="fDepReset">Reset</button>
+      </div>
+      <div id="depTbl"></div>
+      <div id="depPager" class="pagination"></div>
+    </div>`;
+
+  // stats
+  try {
+    const today = startOfToday();
+    const { data } = await sb.from('otp_deposits').select('status,nominal,created_at');
+    const all = data || [];
+    const paidAll = all.filter(d => d.status === 'paid');
+    const todayPaid = paidAll.filter(d => d.created_at >= today);
+    $('#dToday').textContent = fmtRp(todayPaid.reduce((a,d) => a + Number(d.nominal||0), 0));
+    $('#dTotal').textContent = fmtRp(paidAll.reduce((a,d) => a + Number(d.nominal||0), 0));
+    $('#dPend').textContent  = fmtNum(all.filter(d => d.status === 'pending').length);
+    $('#dPaid').textContent  = fmtNum(paidAll.length);
+    $('#dFail').textContent  = fmtNum(all.filter(d => ['expired','failed','cancelled'].includes(d.status)).length);
+    $('#dCount').textContent = fmtNum(all.length);
+  } catch { /* ignore */ }
+
+  const load = debounce(async () => {
+    DepState.q = $('#fDepQ').value.trim();
+    DepState.status = $('#fDepStatus').value;
+    DepState.from = $('#fDepFrom').value;
+    DepState.to = $('#fDepTo').value;
+    DepState.page = 1;
+    await loadDeposits();
+  }, 400);
+  $('#fDepQ').oninput = load; $('#fDepStatus').onchange = load; $('#fDepFrom').onchange = load; $('#fDepTo').onchange = load;
+  $('#fDepReset').onclick = () => {
+    $('#fDepQ').value=''; $('#fDepStatus').value=''; $('#fDepFrom').value=''; $('#fDepTo').value='';
+    Object.assign(DepState, { q:'', status:'', from:'', to:'', page:1 });
+    loadDeposits();
+  };
+  await loadDeposits();
+}
+
+async function loadDeposits() {
+  const box = $('#depTbl'), pager = $('#depPager');
+  box.innerHTML = `<div class="skeleton sk-block" style="margin:14px"></div>`;
+  pager.innerHTML = '';
+  try {
+    const from = (DepState.page - 1) * DepState.per;
+    const to = from + DepState.per - 1;
+    let q = sb.from('otp_deposits').select('*', { count: 'exact' });
+    if (DepState.status) q = q.eq('status', DepState.status);
+    if (DepState.from) q = q.gte('created_at', new Date(DepState.from).toISOString());
+    if (DepState.to) { const t = new Date(DepState.to); t.setHours(23,59,59,999); q = q.lte('created_at', t.toISOString()); }
+    if (DepState.q) {
+      const kw = DepState.q.replace(/[%_]/g, '');
+      const ors = [`invoice_id.ilike.%${kw}%`];
+      if (/^\d+$/.test(kw)) ors.push(`user_id.eq.${kw}`, `id.eq.${kw}`);
+      q = q.or(ors.join(','));
+    }
+    q = q.order('created_at', { ascending: false }).range(from, to);
+    const { data: rows, error, count } = await q;
+    if (error) throw error;
+    if (!rows || !rows.length) { box.innerHTML = emptyState('Belum ada transaksi deposit'); return; }
+
+    const userIds = [...new Set(rows.map(r => r.user_id).filter(Boolean))];
+    const usersMap = {};
+    if (userIds.length) {
+      const { data: us } = await sb.from('otp_users').select('id,first_name,last_name,username').in('id', userIds);
+      (us || []).forEach(u => usersMap[u.id] = u);
+    }
+
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>ID</th><th>Invoice</th><th>User</th>
+        <th class="right">Nominal</th><th class="right">Fee</th><th class="right">Total</th>
+        <th>Status</th><th>Dibuat</th><th>Expired</th><th></th></tr></thead>
+      <tbody>${rows.map(r => {
+        const u = usersMap[r.user_id] || {};
+        return `<tr>
+          <td class="mono">#${r.id}</td>
+          <td class="mono" style="font-size:11.5px">${escHtml(clip(r.invoice_id, 22))}</td>
+          <td><div style="font-weight:600">${escHtml([u.first_name,u.last_name].filter(Boolean).join(' ') || 'User')}</div><div class="muted" style="font-size:11px">${escHtml(r.user_id)}</div></td>
+          <td class="right" style="font-weight:700;color:var(--green)">${fmtRp(r.nominal)}</td>
+          <td class="right">${fmtRp(r.fee)}</td>
+          <td class="right" style="font-weight:700">${fmtRp(r.total)}</td>
+          <td>${statusBadge(r.status)}</td>
+          <td class="muted" style="font-size:12px">${fmtDT(r.created_at)}</td>
+          <td class="muted" style="font-size:12px">${fmtDT(r.expired_at)}</td>
+          <td><button class="btn btn-ghost btn-xs" data-ddet="${r.id}">Detail</button></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+    box.querySelectorAll('[data-ddet]').forEach(b => b.onclick = () => showDepositDetail(Number(b.dataset.ddet)));
+    const totalPages = Math.max(1, Math.ceil((count || 0) / DepState.per));
+    renderPager(pager, totalPages, DepState.page, p => { DepState.page = p; loadDeposits(); });
+  } catch (e) {
+    box.innerHTML = emptyState(e.message || 'Gagal memuat data');
+  }
+}
+
+async function showDepositDetail(id) {
+  Modal.open({ title: `Detail Deposit #${id}`, body: `<div class="skeleton sk-block"></div>` });
+  try {
+    const { data: d, error } = await sb.from('otp_deposits').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!d) throw new Error('Deposit tidak ditemukan.');
+    const { data: u } = await sb.from('otp_users').select('*').eq('id', d.user_id).maybeSingle();
+    Modal.open({
+      title: `Deposit #${d.id}`, wide: true,
+      body: `<div class="section"><h4 class="section-title">Transaksi</h4>
+        <div class="dt">
+          <div class="row"><span class="lbl">ID</span><span class="val mono">#${d.id}</span></div>
+          <div class="row"><span class="lbl">Invoice</span><span class="val mono">${escHtml(d.invoice_id)}</span></div>
+          <div class="row"><span class="lbl">Nominal</span><span class="val" style="color:var(--green)">${fmtRp(d.nominal)}</span></div>
+          <div class="row"><span class="lbl">Fee</span><span class="val">${fmtRp(d.fee)}</span></div>
+          <div class="row"><span class="lbl">Total Bayar</span><span class="val" style="font-weight:700">${fmtRp(d.total)}</span></div>
+          <div class="row"><span class="lbl">Status</span><span class="val">${statusBadge(d.status)}</span></div>
+          <div class="row"><span class="lbl">Dibuat</span><span class="val">${fmtDT(d.created_at)}</span></div>
+          <div class="row"><span class="lbl">Diperbarui</span><span class="val">${fmtDT(d.updated_at)}</span></div>
+          <div class="row"><span class="lbl">Expired</span><span class="val">${fmtDT(d.expired_at)}</span></div>
+          <div class="row"><span class="lbl">Chat ID</span><span class="val mono">${escHtml(d.chat_id || '-')}</span></div>
+        </div>
+      </div>
+      <div class="section"><h4 class="section-title">User</h4>
+        <div class="dt">
+          <div class="row"><span class="lbl">User ID</span><span class="val mono">${escHtml(u ? u.id : '-')}</span></div>
+          <div class="row"><span class="lbl">Username</span><span class="val">${u && u.username ? '@'+escHtml(u.username) : '-'}</span></div>
+          <div class="row"><span class="lbl">Nama</span><span class="val">${escHtml(u ? [u.first_name,u.last_name].filter(Boolean).join(' ') : '-')}</span></div>
+          <div class="row"><span class="lbl">Saldo</span><span class="val">${fmtRp(u ? u.saldo : 0)}</span></div>
+        </div>
+      </div>`,
+      footer: `<button class="btn btn-ghost" onclick="Modal.close()">Tutup</button>`
+    });
+  } catch (e) {
+    Modal.open({ title: 'Gagal', body: `<div class="empty"><p>${escHtml(e.message)}</p></div>`, footer: `<button class="btn btn-ghost" onclick="Modal.close()">Tutup</button>` });
+  }
+}
+
+/* ============================ 4. USER ============================ */
+const UserState = { page: 1, per: 20, q: '', status: '' };
+
+async function renderUsers() {
+  const c = $('#content');
+  c.innerHTML = `
+    <div class="card">
+      <div class="tools">
+        <input class="input input-search" id="fUsrQ" placeholder="Cari ID / username / nama..." />
+        <select class="select" id="fUsrStatus">
+          <option value="">Semua Status</option>
+          <option value="active">Aktif</option>
+          <option value="banned">Diblokir</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" id="fUsrReset">Reset</button>
+      </div>
+      <div id="usrTbl"></div>
+      <div id="usrPager" class="pagination"></div>
+    </div>`;
+  const load = debounce(async () => {
+    UserState.q = $('#fUsrQ').value.trim();
+    UserState.status = $('#fUsrStatus').value;
+    UserState.page = 1;
+    await loadUsers();
+  }, 400);
+  $('#fUsrQ').oninput = load; $('#fUsrStatus').onchange = load;
+  $('#fUsrReset').onclick = () => {
+    $('#fUsrQ').value=''; $('#fUsrStatus').value='';
+    Object.assign(UserState, { q:'', status:'', page:1 });
+    loadUsers();
+  };
+  await loadUsers();
+}
+
+async function loadUsers() {
+  const box = $('#usrTbl'), pager = $('#usrPager');
+  box.innerHTML = `<div class="skeleton sk-block" style="margin:14px"></div>`;
+  pager.innerHTML = '';
+  try {
+    const from = (UserState.page - 1) * UserState.per;
+    const to = from + UserState.per - 1;
+    let q = sb.from('otp_users').select('*', { count: 'exact' });
+    if (UserState.status === 'banned') q = q.eq('is_banned', true);
+    else if (UserState.status === 'active') q = q.or('is_banned.is.null,is_banned.eq.false');
+    if (UserState.q) {
+      const kw = UserState.q.replace(/[%_]/g, '');
+      const ors = [`first_name.ilike.%${kw}%`, `last_name.ilike.%${kw}%`, `username.ilike.%${kw}%`];
+      if (/^\d+$/.test(kw)) ors.push(`id.eq.${kw}`);
+      q = q.or(ors.join(','));
+    }
+    q = q.order('created_at', { ascending: false }).range(from, to);
+    const { data: rows, error, count } = await q;
+    if (error) throw error;
+    if (!rows || !rows.length) { box.innerHTML = emptyState('Belum ada user'); return; }
+
+    // aggregate stats
+    const ids = rows.map(r => r.id);
+    const [ordRes, depRes] = await Promise.all([
+      ids.length ? sb.from('otp_orders').select('user_id,harga_jual,status').in('user_id', ids).eq('status','received') : Promise.resolve({ data: [] }),
+      ids.length ? sb.from('otp_deposits').select('user_id,nominal,status').in('user_id', ids).eq('status','paid') : Promise.resolve({ data: [] }),
+    ]);
+    const agg = {};
+    ids.forEach(id => { agg[id] = { orders: 0, spent: 0, deposit: 0 }; });
+    (ordRes.data || []).forEach(o => { if (agg[o.user_id]) { agg[o.user_id].orders++; agg[o.user_id].spent += Number(o.harga_jual || 0); } });
+    (depRes.data || []).forEach(d => { if (agg[d.user_id]) agg[d.user_id].deposit += Number(d.nominal || 0); });
+
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>User</th><th>Username</th><th class="right">Saldo</th><th class="right">Order</th>
+      <th class="right">Belanja</th><th class="right">Deposit</th><th>Status</th><th>Daftar</th><th></th></tr></thead>
+      <tbody>${rows.map(u => {
+        const a = agg[u.id] || { orders:0, spent:0, deposit:0 };
+        return `<tr>
+          <td><div style="font-weight:600">${escHtml([u.first_name,u.last_name].filter(Boolean).join(' ') || 'User')}</div><div class="muted mono" style="font-size:11px">${escHtml(u.id)}</div></td>
+          <td>${u.username ? '@'+escHtml(u.username) : '<span class="muted">—</span>'}</td>
+          <td class="right" style="font-weight:700;color:var(--green)">${fmtRp(u.saldo)}</td>
+          <td class="right">${fmtNum(a.orders)}</td>
+          <td class="right">${fmtRp(a.spent)}</td>
+          <td class="right">${fmtRp(a.deposit)}</td>
+          <td>${u.is_banned ? '<span class="badge badge-red"><span class="dot"></span>Banned</span>' : '<span class="badge badge-green"><span class="dot"></span>Aktif</span>'}</td>
+          <td class="muted" style="font-size:12px">${fmtD(u.created_at)}</td>
+          <td><button class="btn btn-ghost btn-xs" data-udet="${u.id}">Detail</button></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+    box.querySelectorAll('[data-udet]').forEach(b => b.onclick = () => showUserDetail(Number(b.dataset.udet)));
+    const totalPages = Math.max(1, Math.ceil((count || 0) / UserState.per));
+    renderPager(pager, totalPages, UserState.page, p => { UserState.page = p; loadUsers(); });
+  } catch (e) {
+    box.innerHTML = emptyState(e.message || 'Gagal memuat data');
+  }
+}
+
+async function showUserDetail(id) {
+  Modal.open({ title: 'Memuat detail user...', wide: true, body: `<div class="skeleton sk-block"></div>` });
+  try {
+    const { data: u, error } = await sb.from('otp_users').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!u) throw new Error('User tidak ditemukan.');
+    const [ordRes, depRes] = await Promise.all([
+      sb.from('otp_orders').select('*').eq('user_id', id).order('created_at', { ascending: false }).limit(30),
+      sb.from('otp_deposits').select('*').eq('user_id', id).order('created_at', { ascending: false }).limit(30),
+    ]);
+    const orders = ordRes.data || [];
+    const deposits = depRes.data || [];
+    const refunds = orders.filter(o => o.status === 'refunded');
+
+    Modal.open({
+      title: `User · ${escHtml([u.first_name,u.last_name].filter(Boolean).join(' ') || 'User')}`,
+      wide: true,
+      body: `
+        <div class="tabs" id="usrTabs">
+          <button class="tab active" data-t="prof">Profil</button>
+          <button class="tab" data-t="ord">Pembelian (${orders.length})</button>
+          <button class="tab" data-t="dep">Deposit (${deposits.length})</button>
+          <button class="tab" data-t="ref">Refund (${refunds.length})</button>
+        </div>
+        <div id="usrTabBody"></div>`,
+      footer: `
+        <button class="btn btn-ghost" onclick="Modal.close()">Tutup</button>
+        <button class="btn ${u.is_banned ? 'btn-primary' : 'btn-danger'}" id="btnBan">${u.is_banned ? 'Buka Blokir' : 'Blokir User'}</button>
+        <button class="btn btn-ghost" id="btnAddSaldo">+ Saldo</button>
+        <button class="btn btn-ghost" id="btnSubSaldo">− Saldo</button>`,
+      onMount(m) {
+        const body = m.querySelector('#usrTabBody');
+        const render = (t) => {
+          if (t === 'prof') {
+            const totalSpent = orders.filter(o => o.status === 'received').reduce((a,o) => a + Number(o.harga_jual||0), 0);
+            const totalDep = deposits.filter(d => d.status === 'paid').reduce((a,d) => a + Number(d.nominal||0), 0);
+            body.innerHTML = `<div class="dt">
+              <div class="row"><span class="lbl">Telegram ID</span><span class="val mono">${escHtml(u.id)}</span></div>
+              <div class="row"><span class="lbl">Username</span><span class="val">${u.username ? '@'+escHtml(u.username) : '—'}</span></div>
+              <div class="row"><span class="lbl">Nama</span><span class="val">${escHtml([u.first_name,u.last_name].filter(Boolean).join(' ') || '—')}</span></div>
+              <div class="row"><span class="lbl">Saldo</span><span class="val" style="color:var(--green);font-size:15px">${fmtRp(u.saldo)}</span></div>
+              <div class="row"><span class="lbl">Status</span><span class="val">${u.is_banned ? '🚫 Diblokir' : '✅ Aktif'}</span></div>
+              <div class="row"><span class="lbl">Terdaftar</span><span class="val">${fmtDT(u.created_at)}</span></div>
+              <div class="row"><span class="lbl">Order Sukses</span><span class="val">${fmtNum(orders.filter(o=>o.status==='received').length)}</span></div>
+              <div class="row"><span class="lbl">Total Belanja</span><span class="val">${fmtRp(totalSpent)}</span></div>
+              <div class="row"><span class="lbl">Total Deposit</span><span class="val">${fmtRp(totalDep)}</span></div>
+              <div class="row"><span class="lbl">Update Terakhir</span><span class="val">${fmtDT(u.updated_at)}</span></div>
+            </div>`;
+          } else if (t === 'ord') {
+            body.innerHTML = orders.length ? `<div class="tbl-wrap"><table class="tbl" style="min-width:640px"><thead><tr>
+              <th>ID</th><th>Layanan</th><th>Nomor</th><th class="right">Jual</th><th>Status</th><th>Waktu</th></tr></thead>
+              <tbody>${orders.map(o => `<tr><td class="mono">#${o.id}</td>
+                <td>${escHtml(clip(o.service_name || o.service_code, 22))}</td>
+                <td class="mono">${escHtml(o.phone_number || '-')}</td>
+                <td class="right">${fmtRp(o.harga_jual)}</td>
+                <td>${statusBadge(o.status)}</td>
+                <td class="muted" style="font-size:12px">${fmtDT(o.created_at)}</td></tr>`).join('')}</tbody></table></div>` : emptyState('Belum ada order');
+          } else if (t === 'dep') {
+            body.innerHTML = deposits.length ? `<div class="tbl-wrap"><table class="tbl" style="min-width:640px"><thead><tr>
+              <th>ID</th><th>Invoice</th><th class="right">Nominal</th><th class="right">Total</th><th>Status</th><th>Waktu</th></tr></thead>
+              <tbody>${deposits.map(d => `<tr><td class="mono">#${d.id}</td>
+                <td class="mono" style="font-size:11.5px">${escHtml(clip(d.invoice_id, 22))}</td>
+                <td class="right">${fmtRp(d.nominal)}</td><td class="right">${fmtRp(d.total)}</td>
+                <td>${statusBadge(d.status)}</td>
+                <td class="muted" style="font-size:12px">${fmtDT(d.created_at)}</td></tr>`).join('')}</tbody></table></div>` : emptyState('Belum ada deposit');
+          } else if (t === 'ref') {
+            body.innerHTML = refunds.length ? `<div class="tbl-wrap"><table class="tbl" style="min-width:520px"><thead><tr>
+              <th>Order</th><th class="right">Nominal</th><th>Waktu</th></tr></thead>
+              <tbody>${refunds.map(r => `<tr><td class="mono">#${r.id}</td>
+                <td class="right">${fmtRp(r.harga_jual)}</td>
+                <td class="muted" style="font-size:12px">${fmtDT(r.updated_at || r.created_at)}</td></tr>`).join('')}</tbody></table></div>` : emptyState('Belum ada refund');
+          }
+        };
+        render('prof');
+        m.querySelectorAll('#usrTabs .tab').forEach(tb => tb.onclick = () => {
+          m.querySelectorAll('#usrTabs .tab').forEach(x => x.classList.remove('active'));
+          tb.classList.add('active');
+          render(tb.dataset.t);
+        });
+        m.querySelector('#btnBan').onclick = async () => {
+          const btn = m.querySelector('#btnBan');
+          const target = !u.is_banned;
+          const ok = await Modal.confirm({
+            title: target ? 'Blokir User' : 'Buka Blokir',
+            message: target ? `Yakin blokir user <b>${u.id}</b>?` : `Yakin buka blokir user <b>${u.id}</b>?`,
+            confirmText: 'Ya', danger: target,
+          });
+          if (!ok) return;
+          await withBtn(btn, async () => {
+            try {
+              const { error } = await sb.from('otp_users').update({ is_banned: target }).eq('id', u.id);
+              if (error) throw error;
+              toast(target ? 'User diblokir' : 'Blokir dibuka', 'success');
+              Modal.close(); loadUsers();
+            } catch (e) { toast(e.message || 'Gagal', 'error'); }
+          }, 'Proses...');
+        };
+        m.querySelector('#btnAddSaldo').onclick = () => adjustBalanceModal(u, 'add', () => { Modal.close(); loadUsers(); });
+        m.querySelector('#btnSubSaldo').onclick = () => adjustBalanceModal(u, 'sub', () => { Modal.close(); loadUsers(); });
+      }
+    });
+  } catch (e) {
+    Modal.open({ title: 'Gagal', body: `<div class="empty"><p>${escHtml(e.message)}</p></div>`, footer: `<button class="btn btn-ghost" onclick="Modal.close()">Tutup</button>` });
+  }
+}
+
+function adjustBalanceModal(user, mode, onDone) {
+  const isAdd = mode === 'add';
+  Modal.open({
+    title: isAdd ? 'Tambah Saldo' : 'Kurangi Saldo',
+    body: `
+      <div class="field"><label>User ID</label><input class="input" value="${escHtml(user.id)}" disabled /></div>
+      <div class="field"><label>Nama</label><input class="input" value="${escHtml([user.first_name,user.last_name].filter(Boolean).join(' ') || '-')}" disabled /></div>
+      <div class="field"><label>Saldo Saat Ini</label><input class="input" value="${fmtRp(user.saldo)}" disabled /></div>
+      <div class="field"><label>Jumlah (Rp)</label><input class="input" id="adjAmount" type="number" min="1" placeholder="10000" /></div>`,
+    footer: `<button class="btn btn-ghost" onclick="Modal.close()">Batal</button>
+      <button class="btn ${isAdd ? 'btn-primary' : 'btn-danger'}" id="adjGo">${isAdd ? 'Tambah' : 'Kurangi'}</button>`,
+    onMount(m) {
+      const go = m.querySelector('#adjGo');
+      go.onclick = async () => {
+        const amount = Number(m.querySelector('#adjAmount').value);
+        if (!Number.isFinite(amount) || amount <= 0) return toast('Jumlah tidak valid', 'warning');
+        const ok = await Modal.confirm({
+          title: 'Konfirmasi',
+          message: `Yakin ${isAdd ? 'menambah' : 'mengurangi'} saldo <b>${fmtRp(amount)}</b> untuk user <b>${user.id}</b>?`,
+          confirmText: 'Ya', danger: !isAdd,
+        });
+        if (!ok) return;
+        await withBtn(go, async () => {
+          try {
+            const { error } = isAdd
+              ? await sb.rpc('otp_credit', { p_user: user.id, p_amount: amount })
+              : await sb.rpc('otp_debit',  { p_user: user.id, p_amount: amount });
+            if (error) throw error;
+            const { data: u } = await sb.from('otp_users').select('saldo').eq('id', user.id).maybeSingle();
+            toast(`Saldo diperbarui. Saldo baru: ${fmtRp(u ? u.saldo : 0)}`, 'success');
+            if (onDone) onDone();
+          } catch (e) { toast(e.message || 'Gagal', 'error'); }
+        }, 'Proses...');
+      };
+    }
+  });
+}
+
+/* ============================ 5. WITHDRAW ============================ */
+async function renderWithdraw() {
+  const c = $('#content');
+  const settings = await getSettingsMap();
+  const minWd = Number(settings.withdraw_min || 1000);
+  const feePersen = Number(settings.withdraw_fee_persen || 0);
+  const wdMaint = String(settings.withdraw_maintenance || 'off') === 'on';
+
+  // Hitung profit dari otp_orders sukses
+  const { data: paidOrders } = await sb.from('otp_orders').select('harga_jual,harga_modal,status').eq('status','received');
+  const totalProfit = (paidOrders || []).reduce((a,o) => a + (Number(o.harga_jual||0) - Number(o.harga_modal||0)), 0);
+  // Withdraw yang sudah sukses (kalau tabel otp_withdrawals ada)
+  let withdrawn = 0, wdRows = [];
+  try {
+    const { data: wds } = await sb.from('otp_withdrawals').select('*').eq('status','success');
+    wdRows = wds || [];
+    withdrawn = wdRows.reduce((a,w) => a + Number(w.amount||0), 0);
+  } catch { /* tabel belum ada */ }
+  const available = Math.max(0, totalProfit - withdrawn);
+
+  c.innerHTML = `
+    <div class="grid-dash mb-2">
+      ${statCard({ label: 'Total Profit', value: fmtRp(totalProfit) })}
+      ${statCard({ label: 'Sudah Ditarik', value: fmtRp(withdrawn) })}
+      ${statCard({ label: 'Saldo Profit', value: `<span style="color:var(--green)">${fmtRp(available)}</span>` })}
+      ${statCard({ label: 'Minimal WD', value: fmtRp(minWd) })}
+    </div>
+    ${wdMaint ? '<div class="card mb-2" style="border-color:rgba(245,158,11,.4);background:var(--yellow-soft)">⚠️ Withdraw sedang maintenance. Permintaan baru dinonaktifkan.</div>' : ''}
+
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-h"><h4 class="card-title">Form Withdraw</h4></div>
+        <div class="form-grid">
+          <div class="field"><label>Metode</label>
+            <select class="select" id="wdMethod">
+              <option value="DANA">DANA</option><option value="GoPay">GoPay</option>
+              <option value="OVO">OVO</option><option value="ShopeePay">ShopeePay</option>
+              <option value="Bank">Bank Transfer</option>
+            </select></div>
+          <div class="field"><label>Nama Penerima</label>
+            <input class="input" id="wdName" placeholder="Nama sesuai rekening/e-wallet" /></div>
+          <div class="field"><label>Nomor Rekening / E-Wallet</label>
+            <input class="input" id="wdAccount" placeholder="08xxxxxxxxxx" /></div>
+          <div class="field"><label>Jumlah (Rp)</label>
+            <input class="input" id="wdAmount" type="number" placeholder="${minWd}" /></div>
+        </div>
+        <div class="mt-2" style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px">
+          <div class="kv"><span class="k">Saldo Profit Tersedia</span><span class="v" id="wdAvailMini">${fmtRp(available)}</span></div>
+          <div class="kv"><span class="k">Nominal WD</span><span class="v" id="wdNominal">Rp 0</span></div>
+          <div class="kv"><span class="k">Fee</span><span class="v" id="wdFee">Rp 0</span></div>
+          <div class="kv total-row"><span class="k">Total Diterima</span><span class="v" style="color:var(--green)" id="wdNet">Rp 0</span></div>
+        </div>
+        <button class="btn btn-primary btn-block mt-2" id="wdGo" ${wdMaint ? 'disabled' : ''}>Tarik Profit</button>
+        <p class="muted" style="font-size:11.5px;margin-top:10px">ⓘ Permintaan withdraw dicatat sebagai pending. Proses transfer aktual lewat dashboard Doku/payment gateway kamu.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h4 class="card-title">Riwayat Withdraw</h4></div>
+        <div id="wdTbl"></div>
+      </div>
+    </div>`;
+
+  const updateForm = () => {
+    const amount = Number($('#wdAmount').value || 0);
+    const fee = Math.ceil((amount * feePersen) / 100);
+    $('#wdNominal').textContent = fmtRp(amount);
+    $('#wdFee').textContent = fmtRp(fee);
+    $('#wdNet').textContent = fmtRp(Math.max(0, amount - fee));
+  };
+  $('#wdAmount').oninput = updateForm;
+
+  $('#wdGo').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const method = $('#wdMethod').value;
+    const account = $('#wdAccount').value.trim();
+    const name = $('#wdName').value.trim();
+    const amount = Number($('#wdAmount').value || 0);
+
+    if (!account) return toast('Nomor tujuan wajib diisi', 'warning');
+    if (!name) return toast('Nama penerima wajib diisi', 'warning');
+    if (!Number.isFinite(amount) || amount <= 0) return toast('Nominal tidak valid', 'warning');
+    if (amount < minWd) return toast(`Minimal penarikan ${fmtRp(minWd)}`, 'warning');
+    if (amount > available) return toast('Saldo profit tidak mencukupi', 'warning');
+
+    const ok = await Modal.confirm({
+      title: 'Konfirmasi Withdraw',
+      message: `Yakin ingin menarik profit sebesar <b>${fmtRp(amount)}</b> ke <b>${escHtml(method)} · ${escHtml(account)}</b> (${escHtml(name)})?`,
+      confirmText: 'Ya, Tarik',
+    });
+    if (!ok) return;
+
+    await withBtn(btn, async () => {
+      try {
+        const fee = Math.ceil((amount * feePersen) / 100);
+        const { data: ins, error } = await sb.from('otp_withdrawals').insert({
+          method, account, account_name: name,
+          amount, fee, net_amount: amount - fee,
+          status: 'pending', note: null
+        }).select().single();
+        if (error) throw error;
+        toast(`Withdraw dibuat (#${ins.id}). Status: pending.`, 'success', 5000);
+        await renderWithdraw();
+      } catch (err) { toast(err.message || 'Gagal withdraw', 'error', 6000); }
+    }, 'Memproses...');
+  };
+
+  await loadWithdrawalsTable();
+}
+
+async function loadWithdrawalsTable() {
+  const box = $('#wdTbl');
+  if (!box) return;
+  box.innerHTML = `<div class="skeleton sk-block"></div>`;
+  try {
+    const { data: rows, error } = await sb.from('otp_withdrawals').select('*').order('created_at', { ascending: false }).limit(30);
+    if (error) throw error;
+    if (!rows || !rows.length) { box.innerHTML = emptyState('Belum ada riwayat withdraw'); return; }
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl" style="min-width:520px"><thead><tr>
+      <th>ID</th><th>Metode</th><th>Nomor</th><th class="right">Nominal</th><th>Status</th><th>Waktu</th></tr></thead>
+      <tbody>${rows.map(w => `<tr>
+        <td class="mono">#${w.id}</td><td>${escHtml(w.method)}</td>
+        <td class="mono" style="font-size:12px">${escHtml(w.account)}</td>
+        <td class="right" style="font-weight:700">${fmtRp(w.amount)}</td>
+        <td>${statusBadge(w.status)}</td>
+        <td class="muted" style="font-size:12px">${fmtDT(w.created_at)}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  } catch (e) {
+    box.innerHTML = emptyState('Tabel otp_withdrawals belum dibuat. Buat dulu di SQL.');
+  }
+}
+
+/* ============================ 6. BROADCAST ============================ */
+async function renderBroadcast() {
+  const c = $('#content');
+  const { count: totalUsers } = await sb.from('otp_users').select('id', { count: 'exact', head: true });
+
+  c.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-h"><h4 class="card-title">Buat Broadcast</h4></div>
+        <div class="field"><label>Jenis Pesan</label>
+          <select class="select" id="bcType">
+            <option value="text">Teks</option>
+            <option value="photo">Foto + Caption</option>
+          </select></div>
+        <div class="field hidden" id="bcPhotoWrap">
+          <label>Upload Foto</label>
+          <input class="input" type="file" accept="image/*" id="bcPhotoFile" />
+          <p class="muted" style="font-size:11px;margin-top:4px">Pilih foto langsung dari perangkat, ukuran & resolusi bebas.</p>
+        </div>
+        <div class="field"><label>Pesan / Caption</label>
+          <textarea class="textarea" id="bcText" placeholder="Halo Sobat PEDIA OTP! ..." style="min-height:160px"></textarea></div>
+        <div class="flex gap-2 mb-2">
+          <label class="switch-row full">
+            <div><div class="lbl">Parse Mode HTML</div><div class="desc">Dukung &lt;b&gt;, &lt;i&gt;, &lt;a&gt;</div></div>
+            <label class="switch"><input type="checkbox" id="bcHtml" checked><span class="slider"></span></label>
+          </label>
+        </div>
+        <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px">
+          <div class="kv"><span class="k">Estimasi target</span><span class="v">${fmtNum(totalUsers || 0)} user</span></div>
+        </div>
+        <button class="btn btn-primary btn-block mt-2" id="bcGo">Kirim Broadcast</button>
+        <button class="btn btn-ghost btn-block mt-1" id="bcCancel">Batal / Stop</button>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h4 class="card-title">Preview</h4></div>
+        <div class="preview" id="bcPreview"><span class="muted">Pesan akan tampil di sini...</span></div>
+        <div class="card-h mt-2"><h4 class="card-title">Progress</h4><span class="card-sub" id="bcStatus">—</span></div>
+        <div id="bcProgress"></div>
+      </div>
+    </div>`;
+
+  let bcPhotoPreviewUrl = null;
+  const updatePreview = () => {
+    const text = $('#bcText').value || '';
+    const type = $('#bcType').value;
+    const html = $('#bcHtml').checked;
+    const safe = html ? text : escHtml(text);
+    const imgHtml = (bcPhotoPreviewUrl && type === 'photo') ? `<img src="${bcPhotoPreviewUrl}" alt="foto" />` : '';
+    $('#bcPreview').innerHTML = imgHtml +
+      (text ? `<div style="margin-top:${imgHtml ? '8px' : '0'}">${safe.replace(/\n/g,'<br>')}</div>` : `<span class="muted">Pesan akan tampil di sini...</span>`);
+  };
+  $('#bcText').addEventListener('input', updatePreview);
+  $('#bcPhotoFile').addEventListener('change', (e) => {
+    const f = e.currentTarget.files[0];
+    if (bcPhotoPreviewUrl) URL.revokeObjectURL(bcPhotoPreviewUrl);
+    bcPhotoPreviewUrl = f ? URL.createObjectURL(f) : null;
+    updatePreview();
+  });
+  $('#bcType').onchange = () => { $('#bcPhotoWrap').classList.toggle('hidden', $('#bcType').value !== 'photo'); updatePreview(); };
+  $('#bcHtml').onchange = updatePreview;
+
+  let cancelFlag = false;
+  $('#bcCancel').onclick = () => { cancelFlag = true; toast('Broadcast dihentikan.', 'warning'); };
+
+  $('#bcGo').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const type = $('#bcType').value;
+    const text = $('#bcText').value.trim();
+    const photoFile = $('#bcPhotoFile').files[0] || null;
+    const parse_mode = $('#bcHtml').checked ? 'HTML' : undefined;
+    if (!text) return toast('Pesan tidak boleh kosong', 'warning');
+    if (type === 'photo' && !photoFile) return toast('Foto wajib diupload', 'warning');
+
+    const ok = await Modal.confirm({
+      title: 'Konfirmasi Broadcast',
+      message: `Kirim broadcast ke <b>${fmtNum(totalUsers)} user</b>? Proses ini akan berjalan bertahap.`,
+      confirmText: 'Ya, Kirim',
+    });
+    if (!ok) return;
+
+    cancelFlag = false;
+    const progress = $('#bcProgress');
+    const status = $('#bcStatus');
+
+    await withBtn(btn, async () => {
+      try {
+        // Ambil semua user ID
+        const { data: users, error } = await sb.from('otp_users').select('id');
+        if (error) throw error;
+        const targets = users || [];
+        const total = targets.length;
+        if (!total) { toast('Belum ada user.', 'warning'); return; }
+
+        let sent = 0, failed = 0, blocked = 0;
+        let photoFileId = null;
+        const startTs = Date.now();
+        status.textContent = 'Berjalan...';
+
+        const render = () => {
+          const pct = Math.min(100, Math.round((sent + failed + blocked) / total * 100));
+          progress.innerHTML = `<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px">
+            <div style="height:8px;background:#1a241f;border-radius:4px;overflow:hidden;margin-bottom:8px">
+              <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--green),var(--green-2));transition:width .3s"></div>
+            </div>
+            <div class="kv"><span class="k">Terkirim</span><span class="v" style="color:var(--green)">${fmtNum(sent)}</span></div>
+            <div class="kv"><span class="k">Gagal</span><span class="v" style="color:var(--red)">${fmtNum(failed)}</span></div>
+            <div class="kv"><span class="k">Diblokir bot</span><span class="v">${fmtNum(blocked)}</span></div>
+            <div class="kv"><span class="k">Total</span><span class="v">${fmtNum(total)}</span></div>
+          </div>`;
+        };
+        render();
+
+        for (let i = 0; i < total; i++) {
+          if (cancelFlag) break;
+          const uid = targets[i].id;
+          try {
+            if (type === 'photo') {
+              if (!photoFileId) {
+                // Upload sekali sebagai file asli, ambil file_id-nya untuk dipakai ulang ke user berikutnya (cepat & hemat kuota)
+                const result = await tgCallMultipart('sendPhoto', { chat_id: uid, caption: text, parse_mode }, 'photo', photoFile);
+                const photos = result.photo || [];
+                photoFileId = photos.length ? photos[photos.length - 1].file_id : null;
+              } else {
+                await tgCall('sendPhoto', { chat_id: uid, photo: photoFileId, caption: text, parse_mode });
+              }
+            } else {
+              await tgCall('sendMessage', { chat_id: uid, text, parse_mode });
+            }
+            sent++;
+          } catch (err) {
+            const m = String(err.message || '').toLowerCase();
+            if (m.includes('blocked') || m.includes('kicked') || m.includes('chat not found') || m.includes('deactivated')) blocked++;
+            else failed++;
+          }
+          if (i % 5 === 0) render();
+          await sleep(60); // rate limit ~16 pesan/detik
+        }
+        render();
+        status.textContent = cancelFlag ? 'Dihentikan' : 'Selesai';
+        const dur = ((Date.now() - startTs) / 1000).toFixed(1) + 's';
+        toast(`Broadcast selesai. Sukses: ${sent}, Gagal: ${failed}, Blocked: ${blocked} (${dur})`, 'success', 7000);
+        // log ke otp_broadcast_logs kalau tabel ada
+        try {
+          await sb.from('otp_broadcast_logs').insert({ type, text, sent, failed, blocked, total, created_at: new Date().toISOString() });
+        } catch {}
+      } catch (err) {
+        toast(err.message || 'Gagal broadcast', 'error', 6000);
+      }
+    }, 'Mengirim...');
+  };
+
+  updatePreview();
+}
+
+/* ============================ 7. PENGATURAN ============================ */
+async function renderSettings() {
+  const c = $('#content');
+  const s = await getSettingsMap();
+
+  c.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-h"><h4 class="card-title">🔐 Ganti Password Admin</h4></div>
+        <div class="field"><label>Password Lama</label><input class="input" type="password" id="pwOld" /></div>
+        <div class="field"><label>Password Baru</label><input class="input" type="password" id="pwNew" /></div>
+        <div class="field"><label>Konfirmasi Password Baru</label><input class="input" type="password" id="pwConf" /></div>
+        <button class="btn btn-primary btn-block" id="pwGo">Simpan Password</button>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h4 class="card-title">⚙️ Sistem</h4></div>
+        <div class="switch-row">
+          <div><div class="lbl">Maintenance Mode</div><div class="desc">Hentikan order baru. Order lama tetap diproses.</div></div>
+          <label class="switch"><input type="checkbox" id="mxMaint" ${String(s.maintenance || 'off') === 'on' ? 'checked' : ''}><span class="slider"></span></label>
+        </div>
+        <div class="switch-row mt-1">
+          <div><div class="lbl">Maintenance Deposit</div><div class="desc">Hentikan permintaan deposit / top up baru.</div></div>
+          <label class="switch"><input type="checkbox" id="mxDepMaint" ${String(s.deposit_maintenance || 'off') === 'on' ? 'checked' : ''}><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h4 class="card-title">💰 Pengaturan Profit</h4><span class="card-sub">Rumus: modal + flat (bulat per Rp 100)</span></div>
+        <div class="field"><label>Nominal Profit Flat (Rp)</label>
+          <input class="input" type="number" step="50" min="0" id="pfF" value="${escHtml(s.markup_flat ?? 300)}" /></div>
+        <div style="background:var(--bg-2);border:1px dashed var(--border-2);border-radius:8px;padding:10px;font-size:12px">
+          <div class="kv"><span class="k">Contoh Modal</span><span class="v">Rp 10.000</span></div>
+          <div class="kv"><span class="k">Profit</span><span class="v" id="pfPrev">—</span></div>
+          <div class="kv"><span class="k">Harga Jual</span><span class="v" style="color:var(--green)" id="pfTotal">—</span></div>
+        </div>
+        <button class="btn btn-primary btn-block mt-1" id="pfGo">Simpan Profit</button>
+      </div>
+    </div>`;
+
+  const updPrev = () => {
+    const m = 10000;
+    const f = Number($('#pfF').value || 0);
+    const profit = f;
+    const total = Math.ceil((m + profit) / 100) * 100;
+    $('#pfPrev').textContent = fmtRp(profit);
+    $('#pfTotal').textContent = fmtRp(total);
+  };
+  $('#pfF').oninput = updPrev; updPrev();
+
+  const saveSettings = async (updates, btn, label) => {
+    return await withBtn(btn, async () => {
+      try {
+        const rows = Object.entries(updates).map(([key, value]) => ({ key, value: String(value) }));
+        const { error } = await sb.from('otp_settings').upsert(rows, { onConflict: 'key' });
+        if (error) throw error;
+        // Verifikasi: baca ulang dari database, pastikan benar-benar tersimpan
+        const { data: chk, error: ce } = await sb.from('otp_settings').select('key,value').in('key', rows.map(r => r.key));
+        if (ce) throw ce;
+        const got = {}; (chk || []).forEach(r => { got[r.key] = String(r.value); });
+        const bad = rows.filter(r => got[r.key] !== r.value);
+        if (bad.length) throw new Error('Gagal tersimpan di database (' + bad.map(b => b.key).join(', ') + ').');
+        toast(label + ' tersimpan', 'success');
+        return true;
+      } catch (e) { toast(e.message || 'Gagal menyimpan', 'error'); return false; }
+    }, 'Menyimpan...');
+  };
+
+  $('#pwGo').onclick = async (e) => {
+    const oldPw = $('#pwOld').value, newPw = $('#pwNew').value, confPw = $('#pwConf').value;
+    if (!oldPw || !newPw) return toast('Semua field wajib diisi', 'warning');
+    if (newPw.length < 6) return toast('Password baru minimal 6 karakter', 'warning');
+    if (newPw !== confPw) return toast('Konfirmasi tidak cocok', 'warning');
+    const ok = await Modal.confirm({ title: 'Konfirmasi Ganti Password', message: 'Yakin ganti password? Kamu akan logout otomatis.', confirmText: 'Ya, Ganti' });
+    if (!ok) return;
+    await withBtn(e.currentTarget, async () => {
+      try { await Auth.changePassword(oldPw, newPw); toast('Password diubah. Login ulang...', 'success'); setTimeout(() => Auth.logout(), 900); }
+      catch (err) { toast(err.message, 'error'); }
+    }, 'Menyimpan...');
+  };
+
+  $('#mxMaint').onchange = (e) => saveSettings({ maintenance: e.currentTarget.checked ? 'on' : 'off' }, e.currentTarget, 'Maintenance');
+  $('#mxDepMaint').onchange = async (e) => {
+    const cb = e.currentTarget, val = cb.checked ? 'on' : 'off';
+    // Tulis ke 2 nama key supaya cocok dengan pembacaan bot; kalau gagal, saklar dikembalikan.
+    const okSave = await saveSettings({ deposit_maintenance: val, maintenance_deposit: val }, cb, 'Maintenance deposit');
+    if (okSave === false) cb.checked = (val !== 'on');
+  };
+  $('#pfGo').onclick = async (e) => {
+    const f = Number($('#pfF').value || 0);
+    if (!Number.isFinite(f) || f < 0) return toast('Angka tidak valid', 'warning');
+    // markup_persen dipaksa 0 agar bot hanya memakai profit flat
+    await saveSettings({ markup_persen: 0, markup_flat: f }, e.currentTarget, 'Profit');
+  };
+}
+
+/* ============================ SYS STATUS ============================ */
+async function refreshSysStatus() {
+  try {
+    const s = await getSettingsMap();
+    if (String(s.maintenance || 'off') === 'on') { $('#sysStatus').classList.add('maint'); $('#sysStatusLabel').textContent = 'Maintenance'; }
+    else { $('#sysStatus').classList.remove('maint'); $('#sysStatusLabel').textContent = 'Online'; }
+  } catch {}
+}
+
+/* ============================ EVENTS GLOBAL ============================ */
+function initGlobalEvents() {
+  $('#hamburgerBtn').onclick = openSidebar;
+  $('#sidebarBackdrop').onclick = closeSidebar;
+  $$('.nav-item').forEach(n => n.onclick = () => navigate(n.dataset.page));
+  $('#refreshBtn').onclick = async (e) => {
+    await withBtn(e.currentTarget, async () => {
+      try { await PAGES[App.currentPage].render(); toast('Data diperbarui', 'success', 2000); }
+      catch (err) { toast(err.message || 'Gagal refresh', 'error'); }
+    }, '');
+  };
+  $('#logoutBtn').onclick = async () => {
+    const ok = await Modal.confirm({ title: 'Logout', message: 'Apakah kamu yakin ingin keluar?', confirmText: 'Ya', cancelText: 'Tidak', danger: true });
+    if (ok) { toast('Berhasil logout', 'success'); setTimeout(() => Auth.logout(), 500); }
+  };
+  $('#loginForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = $('#loginBtn');
+    const pass = $('#loginPass').value;
+    if (!pass) return toast('Password wajib diisi', 'warning');
+    await withBtn(btn, async () => {
+      try {
+        await Auth.login(pass);
+        toast('Login berhasil', 'success');
+        await enterApp();
+      } catch (err) {
+        toast(err.message || 'Password salah', 'error', 4500);
+        $('#loginPass').value = ''; $('#loginPass').focus();
+      }
+    }, 'Memeriksa...');
+  };
+  $('#togglePass').onclick = () => {
+    const inp = $('#loginPass');
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    $('#eyeOpen').classList.toggle('hidden', show);
+    $('#eyeOff').classList.toggle('hidden', !show);
+  };
+}
+
+/* ============================ ENTER ============================ */
+async function enterApp() {
+  $('#loginPage').classList.add('hidden');
+  $('#appPage').classList.remove('hidden');
+  const s = Auth.get();
+  const name = (s && s.name) || 'Admin';
+  $('#adminName').textContent = name;
+  $('#adminAvatar').textContent = initials(name);
+  await refreshSysStatus();
+  navigate('dashboard');
+}
+
+/* ============================ BOOT ============================ */
+(function boot() {
+  initGlobalEvents();
+  if (Auth.isLoggedIn()) {
+    enterApp().catch(err => { console.error(err); toast(err.message, 'error'); });
+  } else {
+    setTimeout(() => { if (PEDIA_ENV.SUPABASE_URL) $('#loginPass').focus(); }, 200);
+  }
+})();
+
+window.Modal = Modal;
+</script>
+</body>
+</html>
