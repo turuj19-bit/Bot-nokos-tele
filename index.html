@@ -433,11 +433,29 @@ table.tbl tbody tr:hover{background:var(--card-2)}
 </div>
 
 <script>
-/* ============ KONFIGURASI (ISI DI SINI — sebelumnya env.js / Environment Variables Vercel) ============ */
+/* ==================================================================================
+   ⚙️  KONFIGURASI API — SEMUA API / TOKEN DIISI DI SINI (satu-satunya tempat)
+   Tidak pakai env.js / pedia.env / Environment Variables Vercel.
+   Isi di antara tanda kutip "...", simpan, lalu deploy ulang.
+   ================================================================================== */
 window.PEDIA_ENV = {
-  SUPABASE_URL: "https://ubzvsfaqhgmsitznjzrk.supabase.co",       
-  SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVienZzZmFxaGdtc2l0em5qenJrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDE4NzcwMCwiZXhwIjoyMTA1NzYzNzAwfQ.VvqA9wVxvF4S4wS9zf3FT6C3yn0FxXEnj30J3eQgctE",       // anon key Supabase (bukan service_role)
-  BOT_TOKEN: "7759498850:AAGN3VQ6QXlXo9NvQkalnNzJmI8bSVuttQQ",          // token bot Telegram
+  /* --- 1. SUPABASE (wajib) --- */
+  SUPABASE_URL: "https://ubzvsfaqhgmsitznjzrk.supabase.co",
+  SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVienZzZmFxaGdtc2l0em5qenJrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDE4NzcwMCwiZXhwIjoyMTA1NzYzNzAwfQ.VvqA9wVxvF4S4wS9zf3FT6C3yn0FxXEnj30J3eQgctE",
+
+  /* --- 2. TELEGRAM BOT (wajib) --- */
+  BOT_TOKEN: "7759498850:AAGN3VQ6QXlXo9NvQkalnNzJmI8bSVuttQQ",
+
+  /* --- 3. PROVIDER OTP / API PUSAT (dipakai saat Refund membatalkan order di provider) ---
+     PROVIDER_CANCEL_URL: URL cancel dari dokumentasi provider. Boleh pakai {key} (= PROVIDER_API_KEY)
+     dan {id} (= provider_order_id). Contoh: "https://DOMAIN-PROVIDER/api/cancel?api_key={key}&order_id={id}" */
+  PROVIDER_API_KEY: "",
+  PROVIDER_CANCEL_URL: "",
+  PROVIDER_CANCEL_METHOD: "GET",     // GET / POST
+  PROVIDER_CANCEL_HEADERS: {},       // contoh: { "Authorization": "Bearer {key}" }
+  PROVIDER_CANCEL_BODY: null,        // khusus POST, contoh: { order_id: "{id}", api_key: "{key}" }
+
+  /* --- 4. DOKU (opsional) --- */
   DOKU_CLIENT_ID: "",     // opsional
   DOKU_SECRET_KEY: "",    // opsional
   DOKU_BASE_URL: ""       // opsional
@@ -451,13 +469,16 @@ window.PEDIA_ENV = {
    (tepat sebelum script utama). Tidak perlu env.js, build.js, package.json, atau vercel.json.
    =================================================================================== */
 const PEDIA_ENV = window.PEDIA_ENV || {};
+// Bersihkan spasi/enter yang ikut ter-paste supaya isi API selalu terbaca
+Object.keys(PEDIA_ENV).forEach(k => { if (typeof PEDIA_ENV[k] === 'string') PEDIA_ENV[k] = PEDIA_ENV[k].trim(); });
+PEDIA_ENV.SUPABASE_URL = (PEDIA_ENV.SUPABASE_URL || '').replace(/\/+$/, '');
 
 /* ============ REFUND KE PROVIDER (saldo API pusat) ============
    Saat admin klik Refund, sistem WAJIB membatalkan order di website provider (tempat API)
    dulu. Kalau provider gagal / menolak -> refund dibatalkan total (saldo user TIDAK ditambah),
    supaya saldo pusat & saldo user selalu sinkron.
 
-   Isi PROVIDER_CANCEL sesuai dokumentasi API provider kamu.
+   Isi PROVIDER_API_KEY + PROVIDER_CANCEL_URL di blok PEDIA_ENV paling atas (sesuai dokumentasi API provider kamu).
    Key = isi kolom `server` di tabel otp_orders (ekonomi / premium / khusus), atau '*' untuk semua server.
    {id} akan diganti otomatis dengan provider_order_id.
    Contoh:
@@ -472,7 +493,14 @@ const PEDIA_ENV = window.PEDIA_ENV || {};
    };
 */
 const REFUND_REQUIRE_PROVIDER = true;   // true = wajib sukses cancel di provider dulu (disarankan)
-const PROVIDER_CANCEL = {};
+const PROVIDER_CANCEL = PEDIA_ENV.PROVIDER_CANCEL_URL ? {
+  '*': {
+    method: PEDIA_ENV.PROVIDER_CANCEL_METHOD || 'GET',
+    url: PEDIA_ENV.PROVIDER_CANCEL_URL,
+    headers: PEDIA_ENV.PROVIDER_CANCEL_HEADERS || {},
+    body: PEDIA_ENV.PROVIDER_CANCEL_BODY == null ? null : PEDIA_ENV.PROVIDER_CANCEL_BODY,
+  },
+} : {};
 
 /* ============ DEFAULT PASSWORD ADMIN (ganti setelah login pertama) ============ */
 const DEFAULT_PASSWORD = "31faris31";   // <-- bisa diubah manual di sini kalau mau
@@ -1074,7 +1102,7 @@ async function showOrderDetail(id) {
 }
 
 function fillTpl(v, id) {
-  if (typeof v === 'string') return v.replace(/\{id\}/g, id);
+  if (typeof v === 'string') return v.replace(/\{id\}/g, id).replace(/\{key\}/g, PEDIA_ENV.PROVIDER_API_KEY || '');
   if (Array.isArray(v)) return v.map(x => fillTpl(x, id));
   if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = fillTpl(v[k], id); }); return o; }
   return v;
@@ -1087,7 +1115,7 @@ async function cancelAtProvider(o) {
   const cfg = PROVIDER_CANCEL[o.server] || PROVIDER_CANCEL['*'];
   if (!cfg || !cfg.url) {
     if (REFUND_REQUIRE_PROVIDER) {
-      throw new Error('Refund dihentikan: API cancel provider untuk server "' + (o.server || '-') + '" belum diisi (PROVIDER_CANCEL di index.html). Saldo user & saldo provider belum diubah.');
+      throw new Error('Refund dihentikan: API cancel provider untuk server "' + (o.server || '-') + '" belum diisi (isi PROVIDER_API_KEY & PROVIDER_CANCEL_URL di blok PEDIA_ENV index.html). Saldo user & saldo provider belum diubah.');
     }
     return { skipped: true, note: 'API cancel provider belum diisi' };
   }
