@@ -1,0 +1,7 @@
+{
+  "name": "pedia-otp-admin",
+  "private": true,
+  "scripts": {
+    "build": "node build.js"
+  }
+}
