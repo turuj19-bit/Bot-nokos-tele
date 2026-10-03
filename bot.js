@@ -65,7 +65,6 @@ const MONITOR_CHANNEL_ID = process.env.MONITOR_CHANNEL_ID
 const CEKNOMOR_URL = process.env.CEKNOMOR_URL || 'https://t.me/Ceknomerdisini_bot';
 
 const BN_BASE = 'https://dibanana.id/api/v1';
-const CANCEL_WAIT_S = 120;  // batas pusat: order baru bisa dibatalkan setelah 120 detik
 const POLL_MS = 5000;      // jeda cek OTP ke dibanana.id
 const PER_PAGE = 12;       // tombol per halaman (layanan / harga)
 const HIST_PER_PAGE = 8;   // riwayat per halaman
@@ -73,7 +72,7 @@ const LINE = '━━━━━━━━━━━━━━━━━━';
 
 // Server yang dijual (kode = parameter "server" di API dibanana.id)
 const SERVERS = {
-  ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga murah' },
+  ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga murah, tanpa menunggu pembatalan 2 menit' },
   premium: { label: '👑 Premium', name: 'Premium', desc: 'Stok banyak, harga bersaing, OTP rate sangat tinggi' },
   khusus:  { label: '⭐ Khusus',  name: 'Khusus',  desc: 'Stok sangat melimpah, harga murah, lengkap pilihan produknya' },
 };
@@ -141,8 +140,16 @@ try {
 // hampir semua negara karena API mengembalikan produk Indonesia -> dibuang & dicek ulang otomatis.
 const NEGARA_VER = 3;
 if (negaraDb.v !== NEGARA_VER) negaraDb = {};
+function markBadCountry(server, cc) {     // negara yang terbukti memberi nomor +62 disembunyikan
+  const code = String(cc).toLowerCase();
+  negaraDb.bad = negaraDb.bad || {};
+  negaraDb.bad[server] = [...new Set([...(negaraDb.bad[server] || []), code])];
+  if (Array.isArray(negaraDb[server])) negaraDb[server] = negaraDb[server].filter((c) => c !== code);
+  try { fs.writeFileSync(NEGARA_FILE, JSON.stringify(negaraDb)); } catch { /* abaikan */ }
+}
 function countryEntries(server) {
-  const codes = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
+  const bad = negaraDb.bad?.[server] || [];
+  const codes = (Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES).filter((c) => !bad.includes(c));
   return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
 }
 
@@ -222,6 +229,7 @@ async function refreshNegara(force = false) {
   if (negaraRunning) return false;
   if (!force && negaraDb.at && Date.now() - negaraDb.at < 24 * 3600 * 1000) return false;
   negaraRunning = true;
+  if (force) negaraDb.bad = {};          // /updatenegara = beri kesempatan baru semua negara
   console.log('🌍 Memperbarui daftar negara dari dibanana.id...');
   try {
     for (const server of SERVERS_EX) {
@@ -237,7 +245,7 @@ async function refreshNegara(force = false) {
         }
       };
       await Promise.all(Array.from({ length: 3 }, worker));
-      let list = found;
+      let list = found.filter((c) => !(negaraDb.bad?.[server] || []).includes(c));
       if (list.includes('gb') && list.includes('uk')) list = list.filter((c) => c !== 'uk');
       if (stat.answered < 50) { console.error(`   ${server}: API jarang menjawab, daftar lama dipertahankan`); continue; }
       negaraDb[server] = list.sort();
@@ -264,6 +272,7 @@ const bot = new Bot(BOT_TOKEN);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const rp = (n) => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+const UP = (x) => String(x ?? '').toUpperCase();   // huruf besar (pakai SEBELUM esc(), supaya &amp; tidak rusak)
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 const wibTime = () =>
   new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour12: false }).replace(/\./g, ':');
@@ -980,13 +989,13 @@ async function showServices(chatId, msgId, uid, server, page) {
   }
   const u = await getUser(uid);
   const pg = paginate(all, page, PER_PAGE);
-  const kb = new InlineKeyboard().text('🔍 Cari Layanan', `svs:${server}`).row();
+  const kb = new InlineKeyboard().text('🔍 CARI LAYANAN', `svs:${server}`).row();
   pg.items.forEach((sv, i) => {
-    kb.text(clip(sv.name, 22), `sv:${server}:${sv.code}`);
+    kb.text(UP(clip(sv.name, 22)), `sv:${server}:${sv.code}`);
     if (i % 2 === 1) kb.row();
   });
   if (pg.items.length % 2 === 1) kb.row();
-  if (!pg.items.length) kb.text('Tidak ada layanan yang cocok', 'noop').row();
+  if (!pg.items.length) kb.text('TIDAK ADA LAYANAN YANG COCOK', 'noop').row();
   navRow(kb, pg.page, pg.total, `svp:${server}`);
   kb.text('⬅️ Kembali', svUp(s));
   const cInfo = countryInfo(s.country);
@@ -1019,7 +1028,7 @@ bot.callbackQuery(/^svs:(\w+)$/, async (ctx) => {
   s.search = ctx.match[1]; s.searchCountry = false;
   s.chatId = ctx.chat.id;
   s.msgId = ctx.callbackQuery.message.message_id;
-  await render(ctx, '🔍 <b>Cari Layanan</b>\n\nKetik nama aplikasi yang kamu cari, contoh: <code>whatsapp</code>',
+  await render(ctx, '🔍 <b>CARI LAYANAN</b>\n\nKetik nama aplikasi yang kamu cari, contoh: <code>whatsapp</code>',
     new InlineKeyboard().text('⬅️ Batal', svReopen(s, ctx.match[1])));
 });
 
@@ -1075,7 +1084,7 @@ const OPERATORS = [
 async function showOperatorPicker(ctx, server, code, name) {
   const s = S(ctx.from.id);
   const country = s.country || 'id';
-  const header = [`${SERVERS[server].label.split(' ')[0]} <b>${esc(name)} — Server ${SERVERS[server].name}</b>`, LINE];
+  const header = [`${SERVERS[server].label.split(' ')[0]} <b>${esc(UP(name))} — Server ${SERVERS[server].name}</b>`, LINE];
   const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
   await render(ctx, [...header, '⏳ Mengecek stok ke server pusat...'].join('\n'));
 
@@ -1166,7 +1175,7 @@ async function showPrices(ctx, page) {
   navRow(kb, pg.page, pg.total, 'prp');
   kb.text('⬅️ Kembali', svReopen(s, s.server));
   await render(ctx, [
-    `📱 <b>${esc(s.serviceName)}</b> · ${SERVERS[s.server].label}`, LINE,
+    `📱 <b>${esc(UP(s.serviceName))}</b> · ${SERVERS[s.server].label}`, LINE,
     `💰 Saldo : <b>${rp(u.saldo)}</b>`,
     `🔄 Update : ${wibTime()} WIB`, LINE,
     `Pilih harga (Rp): (${pg.page + 1}/${pg.total})`,
@@ -1196,7 +1205,7 @@ bot.callbackQuery(/^pr:(\d+)$/, async (ctx) => {
   kb.text('⬅️ Kembali', `prp:${s.pricePage || 0}`);
   await render(ctx, [
     '🧾 <b>Konfirmasi Order</b>', LINE,
-    `📱 Layanan : <b>${esc(s.serviceName)}</b>`,
+    `📱 LAYANAN : <b>${esc(UP(s.serviceName))}</b>`,
     `🖥 Server  : ${SERVERS[s.server].label}`,
     `💰 Harga   : <b>${rp(jual)}</b>`,
     `👛 Saldo   : ${rp(u.saldo)}`, LINE,
@@ -1217,7 +1226,7 @@ const STATUS_HEAD = {
 function orderView(o) {
   const t = [
     STATUS_HEAD[o.status] || `<b>${esc(o.status)}</b>`, LINE,
-    `📱 Layanan : <b>${esc(o.service_name || o.service_code)}</b>`,
+    `📱 LAYANAN : <b>${esc(UP(o.service_name || o.service_code))}</b>`,
     `🖥 Server  : ${SERVERS[o.server]?.label || esc(o.server)}`,
     `📞 Nomor   : <code>${esc(o.phone_number)}</code>`,
     `💰 Harga   : ${rp(o.harga_jual)}`,
@@ -1225,8 +1234,7 @@ function orderView(o) {
   ];
   const kb = new InlineKeyboard();
   if (o.status === 'pending') {
-    t.push('Masukkan nomor di atas ke aplikasi tujuan. OTP akan muncul di sini otomatis.', '⏱ Berlaku ± 19 menit',
-      '❌ Tombol batal baru bisa dipakai 2 menit setelah order.');
+    t.push('Masukkan nomor di atas ke aplikasi tujuan. OTP akan muncul di sini otomatis.', '⏱ Berlaku ± 19 menit');
     kb.text('❌ Batalkan Order', `cx:${o.id}`).row();
   } else if (o.status === 'resend_wait') {
     t.push('SMS ke-2 sudah diminta. Mohon tunggu sebentar...');
@@ -1359,6 +1367,15 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
       return { id };
     };
     const r = await bn('/order', { method: 'POST', body: body(cur.id) });
+    // PENGAMAN: minta negara luar tapi pusat memberi nomor +62 -> batalkan otomatis, saldo user dikembalikan.
+    if (r.ok && (s.country || 'id') !== 'id' && String(r.phone_number || '').replace(/\D/g, '').startsWith('62')) {
+      await credit(uid, jual);
+      markBadCountry(s.server, s.country);
+      notifyAdmins(`🚨 Order pusat #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} adalah +62. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
+      cancelProviderOrder(r.order_id).catch(() => {});
+      return render(ctx, '⚠️ <b>Order dibatalkan otomatis</b>\n\nServer pusat memberi nomor Indonesia (+62), bukan nomor negara yang kamu pilih.\n\n💸 Saldo kamu tidak terpotong.',
+        new InlineKeyboard().text('🌍 Pilih Negara Lain', 'reg:ex').row().text('🏠 Menu Utama', 'home'));
+    }
     if (r.ok && (s.country || 'id') !== 'id' && r.country && String(r.country).toLowerCase() !== String(s.country).toLowerCase()) {
       notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} tapi pusat memberi ${r.country} (${r.phone_number}). Cek API pusat!`);
     }
@@ -1393,6 +1410,18 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
   }
 });
 
+// Batalkan order di pusat (dicoba berulang sampai pusat mengizinkan) untuk memulihkan modal.
+async function cancelProviderOrder(orderId) {
+  for (let i = 0; i < 20; i++) {
+    const c = await bn('/cancel', { method: 'POST', body: { order_id: orderId } });
+    if (c.ok) return true;
+    if (['SMS_ALREADY_RECEIVED', 'CANNOT_CANCEL', 'ORDER_NOT_FOUND'].includes(c.error)) break;
+    await sleep(15000);
+  }
+  notifyAdmins(`⚠️ Order pusat #${orderId} (nomor salah negara) gagal dibatalkan otomatis. Batalkan manual di dibanana.id.`);
+  return false;
+}
+
 async function ownOrder(id, uid) {
   const { data } = await db.from('otp_orders').select('*').eq('id', id).eq('user_id', uid).maybeSingle();
   return data;
@@ -1403,15 +1432,11 @@ bot.callbackQuery(/^cx:(\d+)$/, async (ctx) => {
   if (!o || o.status !== 'pending') {
     return ctx.answerCallbackQuery({ text: 'Order ini tidak bisa dibatalkan.', show_alert: true });
   }
-  // Aturan pusat (semua server, termasuk Ekonomi): pembatalan baru bisa setelah 120 detik sejak order.
-  const sisa = Math.ceil(CANCEL_WAIT_S - (Date.now() - new Date(o.created_at).getTime()) / 1000);
-  if (o.created_at && sisa > 0) {
-    return ctx.answerCallbackQuery({ text: `⏱ Pembatalan bisa dilakukan ${sisa} detik lagi (aturan 2 menit dari server pusat).`, show_alert: true });
-  }
+  // Keputusan boleh/tidaknya batal sepenuhnya ada di server pusat (tidak ada blokir waktu dari bot).
   const r = await bn('/cancel', { method: 'POST', body: { order_id: o.provider_order_id } });
   if (!r.ok) {
     const msg = {
-      TOO_EARLY: '⏱ Pembatalan baru bisa dilakukan 2 menit setelah order dibuat. Coba lagi sebentar.',
+      TOO_EARLY: '⏱ Server pusat belum mengizinkan pembatalan untuk order ini. Coba lagi sebentar.',
       SMS_ALREADY_RECEIVED: 'OTP sudah masuk, order tidak bisa dibatalkan.',
       CANNOT_CANCEL: 'Order ini sudah tidak bisa dibatalkan (statusnya sudah berubah).',
       ORDER_NOT_FOUND: 'Order tidak ditemukan di server pusat. Hubungi CS.',
@@ -1450,7 +1475,7 @@ bot.callbackQuery(/^hist:(\d+)$/, async (ctx) => {
   if (!data?.length) {
     return render(ctx, '📜 <b>Riwayat Order</b>\n\nBelum ada order.', new InlineKeyboard().text('🛒 Buat Order', 'ord').row().text('🏠 Menu Utama', 'home'));
   }
-  data.forEach((o) => kb.text(`${ICON[o.status] || '•'} #${o.id} · ${clip(o.service_name || o.service_code, 14)} · ${rp(o.harga_jual)}`, `od:${o.id}`).row());
+  data.forEach((o) => kb.text(`${ICON[o.status] || '•'} #${o.id} · ${UP(clip(o.service_name || o.service_code, 14))} · ${rp(o.harga_jual)}`, `od:${o.id}`).row());
   const total = Math.max(1, Math.ceil((count || 0) / HIST_PER_PAGE));
   if (total > 1) navRow(kb, page, total, 'hist');
   kb.text('🏠 Menu Utama', 'home');
