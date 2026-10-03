@@ -65,6 +65,7 @@ const MONITOR_CHANNEL_ID = process.env.MONITOR_CHANNEL_ID
 const CEKNOMOR_URL = process.env.CEKNOMOR_URL || 'https://t.me/Ceknomerdisini_bot';
 
 const BN_BASE = 'https://dibanana.id/api/v1';
+const CANCEL_WAIT_S = 120;  // batas pusat: order baru bisa dibatalkan setelah 120 detik
 const POLL_MS = 5000;      // jeda cek OTP ke dibanana.id
 const PER_PAGE = 12;       // tombol per halaman (layanan / harga)
 const HIST_PER_PAGE = 8;   // riwayat per halaman
@@ -72,7 +73,7 @@ const LINE = '━━━━━━━━━━━━━━━━━━';
 
 // Server yang dijual (kode = parameter "server" di API dibanana.id)
 const SERVERS = {
-  ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga murah, tanpa menunggu pembatalan 2 menit' },
+  ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga murah' },
   premium: { label: '👑 Premium', name: 'Premium', desc: 'Stok banyak, harga bersaing, OTP rate sangat tinggi' },
   khusus:  { label: '⭐ Khusus',  name: 'Khusus',  desc: 'Stok sangat melimpah, harga murah, lengkap pilihan produknya' },
 };
@@ -136,6 +137,10 @@ try {
   const j = JSON.parse(fs.readFileSync(NEGARA_FILE, 'utf8'));
   if (j && !Array.isArray(j)) negaraDb = j;
 } catch { /* belum ada */ }
+// v2 = daftar yang sudah divalidasi (lihat VALIDASI NEGARA). Daftar lama (tanpa v) berisi
+// hampir semua negara karena API mengembalikan produk Indonesia -> dibuang & dicek ulang otomatis.
+const NEGARA_VER = 2;
+if (negaraDb.v !== NEGARA_VER) negaraDb = {};
 function countryEntries(server) {
   const codes = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
   return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
@@ -153,6 +158,33 @@ async function probeServices(server) {   // kode layanan WhatsApp & Telegram di 
   } catch { /* pakai bawaan */ }
   return ['wa', 'tg'];
 }
+/* ------------------------------------------------------------------
+ *  VALIDASI NEGARA (anti nomor +62 nyasar)
+ *  Kalau API pusat mengabaikan parameter "country" untuk sebuah server,
+ *  ia mengembalikan produk Indonesia untuk SEMUA negara. Akibatnya daftar
+ *  negara penuh (termasuk Antarktika, dll) dan order malah dapat nomor +62.
+ *  Di sini produk dianggap benar-benar milik negara itu hanya jika:
+ *   1) field "country" di respons (kalau ada) sama dengan negara yang diminta
+ *   2) id produknya BERBEDA dari id produk Indonesia di server & layanan yang sama
+ * ------------------------------------------------------------------ */
+const baseCache = new Map();   // "server:service" -> { at, ids:Set } (id produk Indonesia)
+async function baselineIds(server, service) {
+  const k = `${server}:${service}`;
+  const c = baseCache.get(k);
+  if (c && Date.now() - c.at < 10 * 60000) return c.ids;
+  const r = await bn('/prices', { query: { server, service, country: 'id' } });
+  const ids = new Set(r?.ok ? (r.providers || []).map((p) => p.id) : []);
+  if (r?.ok) baseCache.set(k, { at: Date.now(), ids });
+  return ids;
+}
+function foreignOnly(r, country, base) {
+  const cc = String(country).toLowerCase();
+  if (!r?.ok) return [];
+  if (r.country && String(r.country).toLowerCase() !== cc) return [];
+  return (r.providers || []).filter((p) =>
+    p.stock > 0 && !base.has(p.id) && (!p.country || String(p.country).toLowerCase() === cc));
+}
+
 async function hasStock(server, code, svcs, stat) {
   for (const svc of svcs) {
     let r;
@@ -163,7 +195,10 @@ async function hasStock(server, code, svcs, stat) {
     }
     if (r?.error === 'INVALID_API_KEY') throw new Error('INVALID_API_KEY');
     if (r && r.error !== 'NETWORK' && r.error !== 'BAD_RESPONSE') stat.answered++;
-    if (r?.ok && (r.providers || []).some((p) => p.stock > 0)) return true;
+    if (r?.ok) {
+      const base = await baselineIds(server, svc);
+      if (foreignOnly(r, code, base).length) return true;
+    }
     await sleep(200);
   }
   return false;
@@ -191,10 +226,12 @@ async function refreshNegara(force = false) {
       if (list.includes('gb') && list.includes('uk')) list = list.filter((c) => c !== 'uk');
       if (stat.answered < 50) { console.error(`   ${server}: API jarang menjawab, daftar lama dipertahankan`); continue; }
       negaraDb[server] = list.sort();
+      negaraDb.v = NEGARA_VER;
       fs.writeFileSync(NEGARA_FILE, JSON.stringify(negaraDb));
       console.log(`   ${server}: ${list.length} negara`);
     }
     negaraDb.at = Date.now();
+    negaraDb.v = NEGARA_VER;
     fs.writeFileSync(NEGARA_FILE, JSON.stringify(negaraDb));
     return true;
   } catch (e) {
@@ -358,7 +395,7 @@ async function postMonitorDeposit(d) {
 /* ============================= SETTINGS ============================== */
 let settingsCache = { at: 0, data: {} };
 async function getSettings() {
-  if (Date.now() - settingsCache.at < 30000) return settingsCache.data;
+  if (Date.now() - settingsCache.at < 5000) return settingsCache.data;
   const { data } = await db.from('otp_settings').select('key,value');
   const m = {};
   (data || []).forEach((r) => { m[r.key] = r.value; });
@@ -372,6 +409,13 @@ async function getMarkup() {
     flat: Number(s.markup_flat ?? 300) || 0,
     maintenance: String(s.maintenance || 'off') === 'on',
   };
+}
+// Maintenance khusus menu Deposit (terpisah dari maintenance Order di atas).
+// Dashboard admin menulis ke key "deposit_maintenance" (dan salinannya "maintenance_deposit"
+// untuk kompatibilitas) — di sini dibaca dari salah satu yang ada.
+async function isDepositMaintenance() {
+  const s = await getSettings();
+  return String(s.deposit_maintenance ?? s.maintenance_deposit ?? 'off') === 'on';
 }
 // harga jual = modal + persen + flat, dibulatkan ke atas per Rp100
 const calcJual = (modal, mk) => Math.ceil((modal * (1 + mk.persen / 100) + mk.flat) / 100) * 100;
@@ -558,11 +602,17 @@ async function showDepositPicker(ctx) {
 
 bot.callbackQuery('dep', async (ctx) => {
   await ctx.answerCallbackQuery();
+  if (await isDepositMaintenance()) {
+    return render(ctx, '🛠 <b>Sedang Maintenance</b>\n\nDeposit dimatikan sementara. Silakan coba lagi nanti.', homeBtn());
+  }
   await showDepositPicker(ctx);
 });
 
 bot.callbackQuery('depc', async (ctx) => {
   await ctx.answerCallbackQuery();
+  if (await isDepositMaintenance()) {
+    return render(ctx, '🛠 <b>Sedang Maintenance</b>\n\nDeposit dimatikan sementara. Silakan coba lagi nanti.', homeBtn());
+  }
   const s = S(ctx.from.id);
   s.awaitDeposit = true;
   s.chatId = ctx.chat.id; s.msgId = ctx.callbackQuery.message.message_id;
@@ -632,6 +682,9 @@ async function showDepositInvoice(ctx, row, qrString) {
 }
 
 async function startDeposit(ctx, nominal) {
+  if (await isDepositMaintenance()) {
+    return render(ctx, '🛠 <b>Sedang Maintenance</b>\n\nDeposit dimatikan sementara. Silakan coba lagi nanti.', homeBtn());
+  }
   if (!Number.isFinite(nominal) || nominal < DEPOSIT_MIN || nominal > DEPOSIT_MAX) {
     return render(ctx, `⚠️ Nominal deposit minimal ${rp(DEPOSIT_MIN)} dan maksimal ${rp(DEPOSIT_MAX)}.`,
       new InlineKeyboard().text('⬅️ Kembali', 'dep'));
@@ -922,7 +975,7 @@ async function showServices(chatId, msgId, uid, server, page) {
   navRow(kb, pg.page, pg.total, `svp:${server}`);
   kb.text('⬅️ Kembali', svUp(s));
   const cInfo = countryInfo(s.country);
-  const judul = s.filter && s.filterServer === server ? `🔍 Hasil: <i>${esc(s.filterQ)}</i>` : 'Pilih layanan:';
+  const judul = s.filter && s.filterServer === server ? `🔍 HASIL: <i>${esc(s.filterQ)}</i>` : 'PILIH LAYANAN:';
   await edit(chatId, msgId, [
     `${SERVERS[server].label.split(' ')[0]} <b>Server ${SERVERS[server].name}</b>`,
     ...(cInfo ? [`🌍 Negara : ${cInfo[1]} ${esc(cInfo[2])}`] : []), LINE,
@@ -992,49 +1045,38 @@ bot.on('message:text', async (ctx) => {
 });
 
 /* ============================== HARGA ================================ */
-// Pilihan operator (hanya untuk server Khusus di Nomor Indonesia, lihat OPERATORS di bawah)
+// Pilihan operator (hanya untuk server PREMIUM di Nomor Indonesia — di API pusat parameter operator
+// hanya berlaku untuk premium; di server lain diabaikan sehingga nomor jadi acak)
 const OPERATORS = [
   { code: 'any', label: 'Any (Random)' },
-  { code: 'xl', label: 'XL/AXIS' },
+  { code: 'axis', label: 'XL/AXIS' },
   { code: 'indosat', label: 'Indosat' },
   { code: 'telkomsel', label: 'Telkomsel' },
   { code: 'three', label: 'Three' },
   { code: 'smartfren', label: 'Smartfren' },
+  { code: 'byu', label: 'by.U' },
 ];
-
-// Cek stok real tiap operator ke API pusat (dibanana.id), bukan pajangan statis.
-async function operatorHasStock(server, code, country, operatorCode) {
-  const query = { server, service: code, country };
-  if (operatorCode) query.operator = operatorCode;
-  const r = await bn('/prices', { query });
-  return !!(r.ok && (r.providers || []).some((p) => p.stock > 0));
-}
 
 async function showOperatorPicker(ctx, server, code, name) {
   const s = S(ctx.from.id);
   const country = s.country || 'id';
   const header = [`${SERVERS[server].label.split(' ')[0]} <b>${esc(name)} — Server ${SERVERS[server].name}</b>`, LINE];
   const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
-  await render(ctx, [...header, '⏳ Mengecek stok tiap operator ke server pusat...'].join('\n'));
+  await render(ctx, [...header, '⏳ Mengecek stok ke server pusat...'].join('\n'));
 
-  let checks;
-  try {
-    checks = await Promise.all(OPERATORS.map(async (op) => ({
-      op, ok: await operatorHasStock(server, code, country, op.code),
-    })));
-  } catch {
-    return render(ctx, [...header, '⚠️ Gagal mengambil data stok dari server pusat. Coba lagi.'].join('\n'), back);
+  // /prices tidak punya filter operator, jadi stok dicek sekali untuk layanan ini.
+  const r = await bn('/prices', { query: { server, service: code, country } });
+  if (!r.ok) {
+    return render(ctx, [...header, `⚠️ ${errText(r)}`].join('\n'), back);
   }
-
-  const avail = checks.filter((c) => c.ok).map((c) => c.op);
-  if (!avail.length) {
-    return render(ctx, [...header, `😔 Stok ${esc(name)} sedang kosong untuk semua operator.`].join('\n'), back);
+  if (!(r.providers || []).some((p) => p.stock > 0)) {
+    return render(ctx, [...header, `😔 Stok ${esc(name)} sedang kosong.`].join('\n'), back);
   }
 
   const kb = new InlineKeyboard();
-  const any = avail.find((o) => o.code === 'any');
-  const rest = avail.filter((o) => o.code !== 'any');
-  if (any) kb.text(any.label, `op:${server}:${code}:${any.code}`).row();
+  const any = OPERATORS.find((o) => o.code === 'any');
+  const rest = OPERATORS.filter((o) => o.code !== 'any');
+  kb.text(any.label, `op:${server}:${code}:${any.code}`).row();
   rest.forEach((op, i) => {
     kb.text(op.label, `op:${server}:${code}:${op.code}`);
     if (i % 2 === 1) kb.row();
@@ -1042,7 +1084,7 @@ async function showOperatorPicker(ctx, server, code, name) {
   if (rest.length % 2 === 1) kb.row();
   kb.text('⬅️ Kembali', svReopen(s, server));
 
-  await render(ctx, [...header, 'Pilih operator (hanya yang stoknya tersedia yang tampil):'].join('\n'), kb);
+  await render(ctx, [...header, 'Pilih operator nomor:', '<i>Operator dipilih saat order. Jika operator itu kosong, order ditolak dan saldo tidak terpotong.</i>'].join('\n'), kb);
 }
 
 async function loadPrices(ctx, server, code, operator) {
@@ -1053,14 +1095,18 @@ async function loadPrices(ctx, server, code, operator) {
   const country = s.country || 'id';
   const cInfo = countryInfo(country);
   const query = { server, service: code, country };
-  if (operator) query.operator = operator;
   const r = await bn('/prices', { query });
   const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
   if (!r.ok) {
     const netErr = ['NETWORK', 'SERVER_UNREACHABLE'].includes(r.error);
     return render(ctx, `⚠️ ${cInfo && !netErr ? 'Layanan ini belum tersedia untuk negara / server tersebut.' : errText(r)}`, back);
   }
-  const providers = (r.providers || []).filter((p) => p.stock > 0).sort((a, b) => a.price_idr - b.price_idr);
+  // Negara asing: buang produk yang sebenarnya produk Indonesia (+62) supaya tidak salah beli.
+  const providers = (cInfo ? foreignOnly(r, country, await baselineIds(server, code)) : (r.providers || []).filter((p) => p.stock > 0))
+    .sort((a, b) => a.price_idr - b.price_idr);
+  if (cInfo && !providers.length) {
+    return render(ctx, `😔 <b>${esc(name)} belum tersedia untuk negara ini di server ${SERVERS[server].name}</b>\n\nCoba negara atau server lain.`, back);
+  }
   if (!providers.length) {
     return render(ctx, `😔 <b>Stok ${esc(name)} sedang kosong</b>\n\nCoba server lain atau kembali lagi nanti.`, back);
   }
@@ -1074,7 +1120,7 @@ bot.callbackQuery(/^sv:(\w+):(.+)$/, async (ctx) => {
   if (!SERVERS[server]) return;
   const s = S(ctx.from.id);
   const country = s.country || 'id';
-  if (server === 'khusus' && country === 'id') {
+  if (server === 'premium' && country === 'id') {
     let name = code;
     try { name = (await getServices(server)).find((x) => String(x.code) === code)?.name || code; } catch { /* abaikan */ }
     return showOperatorPicker(ctx, server, code, name);
@@ -1164,7 +1210,8 @@ function orderView(o) {
   ];
   const kb = new InlineKeyboard();
   if (o.status === 'pending') {
-    t.push('Masukkan nomor di atas ke aplikasi tujuan. OTP akan muncul di sini otomatis.', '⏱ Berlaku ± 19 menit');
+    t.push('Masukkan nomor di atas ke aplikasi tujuan. OTP akan muncul di sini otomatis.', '⏱ Berlaku ± 19 menit',
+      '❌ Tombol batal baru bisa dipakai 2 menit setelah order.');
     kb.text('❌ Batalkan Order', `cx:${o.id}`).row();
   } else if (o.status === 'resend_wait') {
     t.push('SMS ke-2 sudah diminta. Mohon tunggu sebentar...');
@@ -1275,11 +1322,15 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
       .text('🔄 Muat Ulang Harga', `sv:${s.server}:${s.service}`).row().text('🏠 Menu Utama', 'home');
     const fresh = await bn('/prices', { query: { server: s.server, service: s.service, country: s.country || 'id' } });
     if (!fresh.ok) return render(ctx, `⚠️ ${errText(fresh)}`, reload);
-    const list = (fresh.providers || []).filter((x) => x.stock > 0);
-    const cur = list.find((x) => x.id === p.id && x.price_idr <= p.price_idr)
-      || list.find((x) => x.price_idr === p.price_idr);
+    const buyCountry = s.country || 'id';
+    const list = buyCountry !== 'id'
+      ? foreignOnly(fresh, buyCountry, await baselineIds(s.server, s.service))
+      : (fresh.providers || []).filter((x) => x.stock > 0);
+    // Wajib produk yang SAMA persis dengan yang dipilih (id sama, harga tidak naik).
+    // Dulu ada cadangan "produk lain dengan harga sama" -> inilah yang membuat nomor acak.
+    const cur = list.find((x) => x.id === p.id && x.price_idr <= p.price_idr);
     if (!cur) {
-      return render(ctx, '😔 <b>Stok sedang habis</b>\n\nStok untuk pilihan ini baru saja habis. Silakan muat ulang harga dan coba lagi.', reload);
+      return render(ctx, '😔 <b>Stok sedang habis</b>\n\nStok atau harga pilihan ini baru saja berubah, jadi order dibatalkan sebelum saldo terpotong. Silakan muat ulang harga dan pilih lagi.', reload);
     }
 
     if (!(await debit(uid, jual))) {
@@ -1289,11 +1340,13 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     await render(ctx, '⏳ <b>Memproses order...</b>\nMohon tunggu sebentar.');
 
     const body = (id) => {
-      if (s.server === 'premium') return { id, operator: 'any' };
-      if (s.server === 'khusus' && s.operator) return { id, operator: s.operator };
+      if (s.server === 'premium') return { id, operator: s.operator || 'any' };   // operator hanya berlaku di premium
       return { id };
     };
     const r = await bn('/order', { method: 'POST', body: body(cur.id) });
+    if (r.ok && (s.country || 'id') !== 'id' && r.country && String(r.country).toLowerCase() !== String(s.country).toLowerCase()) {
+      notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} tapi pusat memberi ${r.country} (${r.phone_number}). Cek API pusat!`);
+    }
     if (r.ok && Number(r.price_idr) > p.price_idr) {
       notifyAdmins(`⚠️ Order #${r.order_id}: modal Rp${r.price_idr} lebih besar dari harga tampil Rp${p.price_idr}. Cek margin.`);
     }
@@ -1335,11 +1388,18 @@ bot.callbackQuery(/^cx:(\d+)$/, async (ctx) => {
   if (!o || o.status !== 'pending') {
     return ctx.answerCallbackQuery({ text: 'Order ini tidak bisa dibatalkan.', show_alert: true });
   }
+  // Aturan pusat (semua server, termasuk Ekonomi): pembatalan baru bisa setelah 120 detik sejak order.
+  const sisa = Math.ceil(CANCEL_WAIT_S - (Date.now() - new Date(o.created_at).getTime()) / 1000);
+  if (o.created_at && sisa > 0) {
+    return ctx.answerCallbackQuery({ text: `⏱ Pembatalan bisa dilakukan ${sisa} detik lagi (aturan 2 menit dari server pusat).`, show_alert: true });
+  }
   const r = await bn('/cancel', { method: 'POST', body: { order_id: o.provider_order_id } });
   if (!r.ok) {
     const msg = {
-      TOO_EARLY: '⏱ Pembatalan baru bisa dilakukan 2 menit setelah order dibuat.',
+      TOO_EARLY: '⏱ Pembatalan baru bisa dilakukan 2 menit setelah order dibuat. Coba lagi sebentar.',
       SMS_ALREADY_RECEIVED: 'OTP sudah masuk, order tidak bisa dibatalkan.',
+      CANNOT_CANCEL: 'Order ini sudah tidak bisa dibatalkan (statusnya sudah berubah).',
+      ORDER_NOT_FOUND: 'Order tidak ditemukan di server pusat. Hubungi CS.',
     }[r.error] || errText(r);
     return ctx.answerCallbackQuery({ text: msg, show_alert: true });
   }
