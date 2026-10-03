@@ -139,7 +139,7 @@ try {
 } catch { /* belum ada */ }
 // v2 = daftar yang sudah divalidasi (lihat VALIDASI NEGARA). Daftar lama (tanpa v) berisi
 // hampir semua negara karena API mengembalikan produk Indonesia -> dibuang & dicek ulang otomatis.
-const NEGARA_VER = 2;
+const NEGARA_VER = 3;
 if (negaraDb.v !== NEGARA_VER) negaraDb = {};
 function countryEntries(server) {
   const codes = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
@@ -167,13 +167,23 @@ async function probeServices(server) {   // kode layanan WhatsApp & Telegram di 
  *   1) field "country" di respons (kalau ada) sama dengan negara yang diminta
  *   2) id produknya BERBEDA dari id produk Indonesia di server & layanan yang sama
  * ------------------------------------------------------------------ */
-const baseCache = new Map();   // "server:service" -> { at, ids:Set } (id produk Indonesia)
+const baseCache = new Map();   // "server:service" -> { at, ids:Set } (sidik jari produk Indonesia)
+// id produk = base64 JSON {s:server, v:layanan, c:negara, p:kode produk, u:...}.
+// Untuk negara palsu (mis. aq) API hanya mengganti "c" tapi p, harga, stok sama persis dengan Indonesia.
+// Jadi id TIDAK bisa dibandingkan langsung; yang dibandingkan adalah p + harga.
+function decId(id) {
+  try { return JSON.parse(Buffer.from(String(id).split('.')[0], 'base64url').toString('utf8')); } catch { return null; }
+}
+function sigOf(p) {
+  const d = decId(p.id);
+  return d && d.p != null ? `${d.p}|${p.price_idr}` : `?|${p.price_idr}|${p.stock}`;
+}
 async function baselineIds(server, service) {
   const k = `${server}:${service}`;
   const c = baseCache.get(k);
   if (c && Date.now() - c.at < 10 * 60000) return c.ids;
   const r = await bn('/prices', { query: { server, service, country: 'id' } });
-  const ids = new Set(r?.ok ? (r.providers || []).map((p) => p.id) : []);
+  const ids = new Set(r?.ok ? (r.providers || []).map(sigOf) : []);
   if (r?.ok) baseCache.set(k, { at: Date.now(), ids });
   return ids;
 }
@@ -181,8 +191,13 @@ function foreignOnly(r, country, base) {
   const cc = String(country).toLowerCase();
   if (!r?.ok) return [];
   if (r.country && String(r.country).toLowerCase() !== cc) return [];
-  return (r.providers || []).filter((p) =>
-    p.stock > 0 && !base.has(p.id) && (!p.country || String(p.country).toLowerCase() === cc));
+  return (r.providers || []).filter((p) => {
+    if (!(p.stock > 0)) return false;
+    if (p.country && String(p.country).toLowerCase() !== cc) return false;
+    const d = decId(p.id);
+    if (d && d.c && String(d.c).toLowerCase() !== cc) return false;
+    return !base.has(sigOf(p));          // produk salinan Indonesia dibuang
+  });
 }
 
 async function hasStock(server, code, svcs, stat) {
