@@ -37,7 +37,7 @@ const path = require('path');
 
 /* ============================ KONFIGURASI ============================ */
 // ⚠️ ISI SEMUA DI BAWAH INI (ganti tulisan ISI_...). Jangan push ke repo PUBLIC kalau sudah berisi key asli.
-const BOT_TOKEN = '8635295379:AAGW_KnHT2cpdNcFo2ndX6_KNS8cOm5ffK8';
+const BOT_TOKEN = '8965096107:AAFb8YrTm7Yx-lPhdnUkWlt7Ub9Qw0vdmlw';
 const SUPABASE_URL = 'https://rlhiojdnqlnvejbbufep.supabase.co';
 const SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsaGlvamRucWxudmVqYmJ1ZmVwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTA2MTkxNywiZXhwIjoyMTA2NjM3OTE3fQ.5woVyl0wJeNVh31XXe-RBdnKBOLBWIi573uWSpP8Wbo';
 const BANANA_API_KEY = 'bn_live_93c1bc4a51f20c86317cc0b8208906fa1f5cb5bebc1ee7c7';
