@@ -4,8 +4,10 @@
  *  Stack : Node.js 22 + grammy + Supabase + API dibanana.id + VPay (QRIS)
  * ============================================================
  *
- *  SEMUA TOKEN / API KEY SEKARANG DITULIS LANGSUNG DI BAGIAN "KONFIGURASI" di bawah
- *  (tidak pakai file .env lagi). Edit di sana, push ke GitHub, lalu jalankan: pedia-update
+ *  TOKEN / API KEY: dibaca dari file .env di VPS (dibuat otomatis oleh script install VPS).
+ *    BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, VPAY_API_KEY
+ *    opsional: VPAY_BASE_URL, ADMIN_IDS, QRIS_FEE_PERSEN
+ *    JANGAN tulis key asli di file ini / di GitHub.
  *
  *  TABEL SUPABASE TAMBAHAN (buat dulu sebelum menu Deposit dipakai):
  *    create table otp_deposits (
@@ -36,18 +38,15 @@ const fs = require('fs');
 const path = require('path');
 
 /* ============================ KONFIGURASI ============================ */
-// ⚠️ ISI SEMUA DI BAWAH INI (ganti tulisan ISI_...). Jangan push ke repo PUBLIC kalau sudah berisi key asli.
-const BOT_TOKEN = '8965096107:AAFb8YrTm7Yx-lPhdnUkWlt7Ub9Qw0vdmlw';
-const SUPABASE_URL = 'https://rlhiojdnqlnvejbbufep.supabase.co';
-const SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsaGlvamRucWxudmVqYmJ1ZmVwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTA2MTkxNywiZXhwIjoyMTA2NjM3OTE3fQ.5woVyl0wJeNVh31XXe-RBdnKBOLBWIi573uWSpP8Wbo';
-const BANANA_API_KEY = 'bn_live_93c1bc4a51f20c86317cc0b8208906fa1f5cb5bebc1ee7c7';
-const VPAY_API_KEY = 'vpay_42a0b77e653fd97ad114922fea623486dd30ed068df0cd5f';   // API key VPay (deposit QRIS)
-const VPAY_BASE_URL = 'https://vitopediapay.com/api';
-const ADMIN_IDS = [];                 // id Telegram admin, contoh: [123456, 789012]
-const QRIS_FEE_PERSEN = 0.7;          // biaya QRIS dibebankan ke user (%)
+// Token & API key TIDAK ditulis di file ini (supaya aman di GitHub). Semuanya dibaca dari file .env di VPS,
+// yang dibuat otomatis oleh script install VPS (bagian "ISI DI SINI").
+const { BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, VPAY_API_KEY } = process.env;
+const VPAY_BASE_URL = process.env.VPAY_BASE_URL || 'https://vitopediapay.com/api';
+const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map((s) => Number(s.trim())).filter(Boolean);   // opsional, id Telegram admin dipisah koma
+const QRIS_FEE_PERSEN = Number(process.env.QRIS_FEE_PERSEN ?? 0.7);   // biaya QRIS dibebankan ke user (%)
 
 for (const [k, v] of Object.entries({ BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, VPAY_API_KEY })) {
-  if (!v || String(v).startsWith('ISI_')) { console.error(`❌ Konfigurasi bot.js belum lengkap: ${k} masih kosong / ISI_...`); process.exit(1); }
+  if (!v) { console.error(`❌ .env belum lengkap: ${k} kosong`); process.exit(1); }
 }
 
 const BRAND = 'PEDIA OTP';
