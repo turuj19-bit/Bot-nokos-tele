@@ -65,6 +65,7 @@ const MONITOR_CHANNEL_ID = process.env.MONITOR_CHANNEL_ID
 const CEKNOMOR_URL = process.env.CEKNOMOR_URL || 'https://t.me/Ceknomerdisini_bot';
 
 const BN_BASE = 'https://dibanana.id/api/v1';
+const CANCEL_WAIT_S = 122;  // aturan pusat: batal baru bisa 120 detik setelah order (+2 dtk cadangan)
 const POLL_MS = 5000;      // jeda cek OTP ke dibanana.id
 const PER_PAGE = 12;       // tombol per halaman (layanan / harga)
 const HIST_PER_PAGE = 8;   // riwayat per halaman
@@ -72,7 +73,7 @@ const LINE = '━━━━━━━━━━━━━━━━━━';
 
 // Server yang dijual (kode = parameter "server" di API dibanana.id)
 const SERVERS = {
-  ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga murah, tanpa menunggu pembatalan 2 menit' },
+  ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga murah' },
   premium: { label: '👑 Premium', name: 'Premium', desc: 'Stok banyak, harga bersaing, OTP rate sangat tinggi' },
   khusus:  { label: '⭐ Khusus',  name: 'Khusus',  desc: 'Stok sangat melimpah, harga murah, lengkap pilihan produknya' },
 };
@@ -156,11 +157,12 @@ function countryEntries(server) {
 const CAND = [...VALID_CC].filter((c) => c !== 'ID');
 
 let negaraRunning = false;
-async function probeServices(server) {   // kode layanan WhatsApp & Telegram di server itu
+async function probeServices(server) {   // kode layanan populer (WA, Telegram, FB, IG, TikTok, Google) untuk cek stok negara
   try {
     const list = await getServices(server);
     const pick = (re) => list.find((x) => re.test(String(x.name)));
-    const codes = [pick(/whatsapp/i), pick(/telegram/i)].filter(Boolean).map((x) => String(x.code));
+    const codes = [/whatsapp/i, /telegram/i, /facebook/i, /instagram/i, /tiktok/i, /google|gmail/i]
+      .map(pick).filter(Boolean).map((x) => String(x.code));
     if (codes.length) return codes;
   } catch { /* pakai bawaan */ }
   return ['wa', 'tg'];
@@ -307,14 +309,13 @@ async function bn(path, { method = 'GET', query, body } = {}) {
 }
 
 function errText(r) {
+  // Kode & pesan asli dari pusat TIDAK ditampilkan ke user (hanya masuk log server).
   switch (r?.error) {
     case 'NO_NUMBERS': return 'Stok nomor untuk pilihan ini sedang habis. Coba harga atau layanan lain.';
     case 'INVALID_PRODUCT_ID': return 'Harga berubah. Silakan pilih ulang.';
-    case 'INSUFFICIENT_BALANCE':
-    case 'INVALID_API_KEY': return 'Layanan sedang gangguan. Coba lagi beberapa saat lagi.';
     case 'SERVER_UNREACHABLE':
     case 'NETWORK': return 'Server penyedia sedang tidak merespons. Coba lagi sebentar lagi.';
-    default: return `Terjadi kesalahan (${r?.error || 'unknown'}). Coba lagi.`;
+    default: return 'Server penyedia sedang bermasalah. Coba lagi sebentar, atau pilih harga / layanan lain.';
   }
 }
 
@@ -577,6 +578,14 @@ bot.use(async (ctx, next) => {
   return next();
 });
 
+bot.use(async (ctx, next) => {
+  const q = ctx.callbackQuery;
+  if (q?.message && !/^cxw?:/.test(q.data || '')) {
+    for (const c of countdownMsgs.values()) if (c.mid === q.message.message_id) c.stop = true;
+  }
+  return next();
+});
+
 bot.command('start', async (ctx) => {
   sessions.delete(ctx.from.id);
   const prev = lastMenu.get(ctx.from.id);
@@ -718,7 +727,8 @@ async function startDeposit(ctx, nominal) {
   const total = nominal + fee;
   const inv = await dokuCreateQris(ctx.from.id, total);
   if (!inv.ok) {
-    return render(ctx, `⚠️ <b>Gagal membuat invoice deposit</b>\n\n${esc(inv.message || 'Layanan pembayaran sedang gangguan.')}`,
+    console.error('deposit gagal dibuat:', inv.message);
+    return render(ctx, '⚠️ <b>Gagal membuat invoice deposit</b>\n\nLayanan pembayaran sedang bermasalah. Coba lagi sebentar lagi.',
       new InlineKeyboard().text('🔄 Coba Lagi', `depn:${nominal}`).row().text('⬅️ Kembali', 'dep'));
   }
   const { data: row, error } = await db.from('otp_deposits').insert({
@@ -885,7 +895,7 @@ bot.callbackQuery('ord', async (ctx) => {
     '🇮🇩 <b>Nomor Indonesia</b>',
     '└ OTP dengan nomor +62', '',
     '🌍 <b>Nomor Luar Negeri</b>',
-    '└ Pilih negara, banyak pilihan', LINE,
+    '└ Pilih negara yang tersedia', LINE,
   ].join('\n'), kb);
 });
 
@@ -1069,48 +1079,6 @@ bot.on('message:text', async (ctx) => {
 });
 
 /* ============================== HARGA ================================ */
-// Pilihan operator (hanya untuk server PREMIUM di Nomor Indonesia — di API pusat parameter operator
-// hanya berlaku untuk premium; di server lain diabaikan sehingga nomor jadi acak)
-const OPERATORS = [
-  { code: 'any', label: 'Any (Random)' },
-  { code: 'axis', label: 'XL/AXIS' },
-  { code: 'indosat', label: 'Indosat' },
-  { code: 'telkomsel', label: 'Telkomsel' },
-  { code: 'three', label: 'Three' },
-  { code: 'smartfren', label: 'Smartfren' },
-  { code: 'byu', label: 'by.U' },
-];
-
-async function showOperatorPicker(ctx, server, code, name) {
-  const s = S(ctx.from.id);
-  const country = s.country || 'id';
-  const header = [`${SERVERS[server].label.split(' ')[0]} <b>${esc(UP(name))} — Server ${SERVERS[server].name}</b>`, LINE];
-  const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
-  await render(ctx, [...header, '⏳ Mengecek stok ke server pusat...'].join('\n'));
-
-  // /prices tidak punya filter operator, jadi stok dicek sekali untuk layanan ini.
-  const r = await bn('/prices', { query: { server, service: code, country } });
-  if (!r.ok) {
-    return render(ctx, [...header, `⚠️ ${errText(r)}`].join('\n'), back);
-  }
-  if (!(r.providers || []).some((p) => p.stock > 0)) {
-    return render(ctx, [...header, `😔 Stok ${esc(name)} sedang kosong.`].join('\n'), back);
-  }
-
-  const kb = new InlineKeyboard();
-  const any = OPERATORS.find((o) => o.code === 'any');
-  const rest = OPERATORS.filter((o) => o.code !== 'any');
-  kb.text(any.label, `op:${server}:${code}:${any.code}`).row();
-  rest.forEach((op, i) => {
-    kb.text(op.label, `op:${server}:${code}:${op.code}`);
-    if (i % 2 === 1) kb.row();
-  });
-  if (rest.length % 2 === 1) kb.row();
-  kb.text('⬅️ Kembali', svReopen(s, server));
-
-  await render(ctx, [...header, 'Pilih operator nomor:', '<i>Operator dipilih saat order. Jika operator itu kosong, order ditolak dan saldo tidak terpotong.</i>'].join('\n'), kb);
-}
-
 async function loadPrices(ctx, server, code, operator) {
   const s = S(ctx.from.id);
   let name = code;
@@ -1143,20 +1111,7 @@ bot.callbackQuery(/^sv:(\w+):(.+)$/, async (ctx) => {
   const [, server, code] = ctx.match;
   if (!SERVERS[server]) return;
   const s = S(ctx.from.id);
-  const country = s.country || 'id';
-  if (server === 'premium' && country === 'id') {
-    let name = code;
-    try { name = (await getServices(server)).find((x) => String(x.code) === code)?.name || code; } catch { /* abaikan */ }
-    return showOperatorPicker(ctx, server, code, name);
-  }
   await loadPrices(ctx, server, code);
-});
-
-bot.callbackQuery(/^op:(\w+):([^:]+):(\w+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
-  const [, server, code, operator] = ctx.match;
-  if (!SERVERS[server] || !OPERATORS.some((o) => o.code === operator)) return;
-  await loadPrices(ctx, server, code, operator);
 });
 
 async function showPrices(ctx, page) {
@@ -1209,11 +1164,16 @@ bot.callbackQuery(/^pr:(\d+)$/, async (ctx) => {
     `🖥 Server  : ${SERVERS[s.server].label}`,
     `💰 Harga   : <b>${rp(jual)}</b>`,
     `👛 Saldo   : ${rp(u.saldo)}`, LINE,
-    cukup ? 'Saldo akan dipotong setelah nomor berhasil didapat.' : '⚠️ Saldo kamu belum cukup untuk order ini.',
+    cukup ? 'Saldo dipotong saat order diproses, lalu dikembalikan otomatis jika order gagal, dibatalkan, atau OTP tidak masuk.' : '⚠️ Saldo kamu belum cukup untuk order ini.',
   ].join('\n'), kb);
 });
 
 /* ============================== ORDER ================================ */
+const cancelRemaining = (o) => (o.created_at
+  ? Math.max(0, Math.ceil(CANCEL_WAIT_S - (Date.now() - new Date(o.created_at).getTime()) / 1000)) : 0);
+const fmtMS = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+const countdownMsgs = new Map();   // order.id -> { mid, stop } pesan yang sedang menampilkan hitung mundur
+
 const ICON = { pending: '⏳', resend_wait: '⏳', received: '✅', cancelled: '❌', expired: '⌛' };
 const STATUS_HEAD = {
   pending: '⏳ <b>Menunggu OTP</b>',
@@ -1234,8 +1194,14 @@ function orderView(o) {
   ];
   const kb = new InlineKeyboard();
   if (o.status === 'pending') {
+    const sisa = cancelRemaining(o);
     t.push('Masukkan nomor di atas ke aplikasi tujuan. OTP akan muncul di sini otomatis.', '⏱ Berlaku ± 19 menit');
-    kb.text('❌ Batalkan Order', `cx:${o.id}`).row();
+    if (sisa > 0) {
+      t.push(`⏳ Pembatalan baru bisa dilakukan dalam ${fmtMS(sisa)}`);
+      kb.text(`⏳ Batal bisa dalam ${fmtMS(sisa)}`, `cxw:${o.id}`).row();
+    } else {
+      kb.text('❌ Batalkan Order', `cx:${o.id}`).row();
+    }
   } else if (o.status === 'resend_wait') {
     t.push('SMS ke-2 sudah diminta. Mohon tunggu sebentar...');
   } else if (o.status === 'received') {
@@ -1282,6 +1248,8 @@ async function watchOrder(o, phase = 1) {
   if (watching.has(o.id)) return;
   watching.add(o.id);
   const t0 = Date.now();
+  let cd = null;                       // hitung mundur tombol batal (hanya fase 1)
+  if (phase === 1 && cancelRemaining(o) > 0) { cd = { mid: o.message_id, stop: false }; countdownMsgs.set(o.id, cd); }
   const limit = phase === 1 ? 35 * 60000 : 12 * 60000;
   const dead = ['cancelled', 'expired', 'refunded'];
   try {
@@ -1298,6 +1266,11 @@ async function watchOrder(o, phase = 1) {
           return;
         }
         if (dead.includes(s.status)) { await refundOrder(o, s.status === 'expired' ? 'expired' : 'cancelled'); return; }
+        if (cd && !cd.stop) {
+          if (cancelRemaining(o) === 0) cd.stop = true;
+          await notifyOrder(o);
+          cd.mid = o.message_id;
+        }
       } else {
         if (s.status === 'received' && s.otp_code_2) {
           const { data } = await db.from('otp_orders')
@@ -1321,6 +1294,7 @@ async function watchOrder(o, phase = 1) {
     console.error('watchOrder error', o.id, e.message);
   } finally {
     watching.delete(o.id);
+    countdownMsgs.delete(o.id);
   }
 }
 
@@ -1363,7 +1337,7 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     await render(ctx, '⏳ <b>Memproses order...</b>\nMohon tunggu sebentar.');
 
     const body = (id) => {
-      if (s.server === 'premium') return { id, operator: s.operator || 'any' };   // operator hanya berlaku di premium
+      if (s.server === 'premium') return { id, operator: 'any' };   // operator tidak dipilih user (acak)
       return { id };
     };
     const r = await bn('/order', { method: 'POST', body: body(cur.id) });
@@ -1384,6 +1358,7 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     }
     if (!r.ok) {
       await credit(uid, jual);
+      console.error(`order gagal | server=${s.server} svc=${s.service} negara=${s.country || 'id'} operator=${s.operator || '-'} |`, JSON.stringify(r));
       if (['INSUFFICIENT_BALANCE', 'INVALID_API_KEY'].includes(r.error)) {
         notifyAdmins(`🚨 Order gagal: ${r.error}. Cek saldo / API key dibanana.id!`);
       }
@@ -1427,12 +1402,24 @@ async function ownOrder(id, uid) {
   return data;
 }
 
+bot.callbackQuery(/^cxw:(\d+)$/, async (ctx) => {
+  const o = await ownOrder(Number(ctx.match[1]), ctx.from.id);
+  const sisa = o ? cancelRemaining(o) : 0;
+  return ctx.answerCallbackQuery({
+    text: sisa > 0 ? `⏳ Pembatalan baru bisa dilakukan dalam ${fmtMS(sisa)}.` : 'Tombol batal sudah aktif. Buka ulang pesan order ini.',
+    show_alert: true,
+  });
+});
+
 bot.callbackQuery(/^cx:(\d+)$/, async (ctx) => {
   const o = await ownOrder(Number(ctx.match[1]), ctx.from.id);
   if (!o || o.status !== 'pending') {
     return ctx.answerCallbackQuery({ text: 'Order ini tidak bisa dibatalkan.', show_alert: true });
   }
-  // Keputusan boleh/tidaknya batal sepenuhnya ada di server pusat (tidak ada blokir waktu dari bot).
+  const sisa = cancelRemaining(o);
+  if (sisa > 0) {
+    return ctx.answerCallbackQuery({ text: `⏳ Pembatalan baru bisa dilakukan dalam ${fmtMS(sisa)}.`, show_alert: true });
+  }
   const r = await bn('/cancel', { method: 'POST', body: { order_id: o.provider_order_id } });
   if (!r.ok) {
     const msg = {
@@ -1453,7 +1440,7 @@ bot.callbackQuery(/^rs:(\d+)$/, async (ctx) => {
     return ctx.answerCallbackQuery({ text: 'SMS ke-2 tidak tersedia untuk order ini.', show_alert: true });
   }
   const r = await bn('/resend', { method: 'POST', body: { order_id: o.provider_order_id } });
-  if (!r.ok) return ctx.answerCallbackQuery({ text: r.message || errText(r), show_alert: true });
+  if (!r.ok) return ctx.answerCallbackQuery({ text: errText(r), show_alert: true });
   await ctx.answerCallbackQuery({ text: 'Permintaan SMS ke-2 dikirim.' });
   const { data } = await db.from('otp_orders')
     .update({ status: 'resend_wait', resend_used: true, message_id: ctx.callbackQuery.message.message_id, updated_at: new Date().toISOString() })
