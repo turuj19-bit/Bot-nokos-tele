@@ -423,7 +423,7 @@ async function vpayCreateQris(uid, amount) {
   if (!d || !d.id || !d.qr_image) {
     return { ok: false, message: 'Respons VPay tidak berisi id / qr_image: ' + JSON.stringify(r.raw).slice(0, 200) };
   }
-  const total = Number(d.total) || (amount + (Number(d.unique_code) || 0));
+  const total = Math.round(Number(d.total)) || (amount + Math.round(Number(d.unique_code) || 0));
   return { ok: true, id: String(d.id), qrImage: String(d.qr_image), total };
 }
 
@@ -792,8 +792,8 @@ async function startDeposit(ctx, nominal) {
     status: 'pending', chat_id: ctx.chat.id, expired_at: expiredAt,
   }).select().single();
   if (error || !row) {
-    console.error('insert deposit gagal', error?.message);
-    notifyAdmins(`🚨 Invoice VPay ${inv.id} (user ${ctx.from.id}, Rp${inv.total}) dibuat tapi gagal disimpan ke DB. Jika user bayar, tambah saldo manual dengan /addsaldo.`);
+    console.error('insert deposit gagal', error?.code, error?.message, error?.details);
+    notifyAdmins(`🚨 Invoice VPay ${inv.id} (user ${ctx.from.id}, Rp${inv.total}) dibuat tapi gagal disimpan ke DB.\nPenyebab: ${error?.message || 'tidak ada data balik'}${error?.code ? ' [' + error.code + ']' : ''}\nJika user bayar, tambah saldo manual dengan /addsaldo.`);
     return render(ctx, '⚠️ Terjadi gangguan saat menyimpan transaksi deposit. Hubungi admin.', homeBtn());
   }
   await showDepositInvoice(ctx, row, inv.qrImage);
