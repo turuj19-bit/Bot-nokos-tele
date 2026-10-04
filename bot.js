@@ -4,18 +4,8 @@
  *  Stack : Node.js 22 + grammy + Supabase + API dibanana.id + VPay (QRIS)
  * ============================================================
  *
- *  FILE .env (satu folder dengan bot.js):
- *    BOT_TOKEN=token_bot_PEDIA_OTP_dari_BotFather
- *    SUPABASE_URL=https://xxxx.supabase.co
- *    SUPABASE_SERVICE_ROLE_KEY=xxxx
- *    BANANA_API_KEY=bn_live_xxxx
- *    CHANNEL_URL=https://t.me/pediaotp
- *    ADMIN_IDS=            # opsional, pisahkan koma (untuk notif + /addsaldo)
- *    MONITOR_CHANNEL_URL=https://t.me/monitornokos    # opsional, default sudah diisi
- *    MONITOR_CHANNEL_ID=@monitornokos                 # opsional; bot HARUS jadi admin channel ini
- *    CEKNOMOR_URL=https://t.me/Ceknomerdisini_bot     # opsional, default sudah diisi
- *    VPAY_API_KEY=vpay_xxxx     # API key VPay (deposit QRIS). Kalau kosong, dipakai key TES di blok VPAY di bawah
- *    VPAY_BASE_URL=https://vitopediapay.com/api   # opsional
+ *  SEMUA TOKEN / API KEY SEKARANG DITULIS LANGSUNG DI BAGIAN "KONFIGURASI" di bawah
+ *  (tidak pakai file .env lagi). Edit di sana, push ke GitHub, lalu jalankan: pedia-update
  *
  *  TABEL SUPABASE TAMBAHAN (buat dulu sebelum menu Deposit dipakai):
  *    create table otp_deposits (
@@ -46,22 +36,29 @@ const fs = require('fs');
 const path = require('path');
 
 /* ============================ KONFIGURASI ============================ */
-const { BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY } = process.env;
-for (const [k, v] of Object.entries({ BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY })) {
-  if (!v) { console.error(`❌ .env belum lengkap: ${k} kosong`); process.exit(1); }
+// ⚠️ ISI SEMUA DI BAWAH INI (ganti tulisan ISI_...). Jangan push ke repo PUBLIC kalau sudah berisi key asli.
+const BOT_TOKEN = '8635295379:AAGW_KnHT2cpdNcFo2ndX6_KNS8cOm5ffK8';
+const SUPABASE_URL = 'https://rlhiojdnqlnvejbbufep.supabase.co';
+const SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsaGlvamRucWxudmVqYmJ1ZmVwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTA2MTkxNywiZXhwIjoyMTA2NjM3OTE3fQ.5woVyl0wJeNVh31XXe-RBdnKBOLBWIi573uWSpP8Wbo';
+const BANANA_API_KEY = 'bn_live_93c1bc4a51f20c86317cc0b8208906fa1f5cb5bebc1ee7c7';
+const VPAY_API_KEY = 'vpay_42a0b77e653fd97ad114922fea623486dd30ed068df0cd5f';   // API key VPay (deposit QRIS)
+const VPAY_BASE_URL = 'https://vitopediapay.com/api';
+const ADMIN_IDS = [];                 // id Telegram admin, contoh: [123456, 789012]
+const QRIS_FEE_PERSEN = 0.7;          // biaya QRIS dibebankan ke user (%)
+
+for (const [k, v] of Object.entries({ BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, VPAY_API_KEY })) {
+  if (!v || String(v).startsWith('ISI_')) { console.error(`❌ Konfigurasi bot.js belum lengkap: ${k} masih kosong / ISI_...`); process.exit(1); }
 }
 
 const BRAND = 'PEDIA OTP';
 const TAGLINE = 'Layanan Nomor OTP Instan &amp; Terpercaya';
-const CHANNEL_URL = process.env.CHANNEL_URL || 'https://t.me/pediaotp';
-const CS_URL = process.env.CS_URL || 'https://t.me/farishost1';   // chat admin / CS
-const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map((s) => Number(s.trim())).filter(Boolean);
+const CHANNEL_URL = 'https://t.me/pediaotp';
+const CS_URL = 'https://t.me/farishost1';   // chat admin / CS
 
 // Menu Monitor (siaran real-time OTP & deposit) & menu Cek Nomor
-const MONITOR_CHANNEL_URL = process.env.MONITOR_CHANNEL_URL || 'https://t.me/monitornokos';
-const MONITOR_CHANNEL_ID = process.env.MONITOR_CHANNEL_ID
-  || ('@' + MONITOR_CHANNEL_URL.replace(/^https?:\/\/t\.me\//, ''));   // bot wajib admin di channel ini
-const CEKNOMOR_URL = process.env.CEKNOMOR_URL || 'https://t.me/Ceknomerdisini_bot';
+const MONITOR_CHANNEL_URL = 'https://t.me/monitornokos';
+const MONITOR_CHANNEL_ID = ('@' + MONITOR_CHANNEL_URL.replace(/^https?:\/\/t\.me\//, ''));   // bot wajib admin di channel ini
+const CEKNOMOR_URL = 'https://t.me/Ceknomerdisini_bot';
 
 const BN_BASE = 'https://dibanana.id/api/v1';
 const CANCEL_WAIT_S = 122;  // aturan pusat: batal baru bisa 120 detik setelah order (+2 dtk cadangan)
@@ -393,13 +390,11 @@ function errText(r) {
 //   POST /pg/create {amount, ref_id}  -> data { id, amount, unique_code, total, qr_image(URL PNG), status }
 //   GET  /pg/check/:id                -> data { status: pending | paid | expired }
 // Total yang harus dibayar user = data.total (nominal + kode unik 0-100 dari VPay).
-// ⚠️ API key di bawah adalah key TES. Ganti dengan key sungguhan lewat .env (VPAY_API_KEY) atau edit baris ini.
-const VPAY_API_KEY = process.env.VPAY_API_KEY || 'vpay_42a0b77e653fd97ad114922fea623486dd30ed068df0cd5f';
-const VPAY_BASE_URL = (process.env.VPAY_BASE_URL || 'https://vitopediapay.com/api').replace(/\/+$/, '');
+const VPAY_URL = VPAY_BASE_URL.replace(/\/+$/, '');
 
 async function vpayRequest(path, { method = 'GET', body } = {}) {
   try {
-    const res = await fetch(VPAY_BASE_URL + path, {
+    const res = await fetch(VPAY_URL + path, {
       method,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${VPAY_API_KEY}` },
       body: body ? JSON.stringify(body) : undefined,
@@ -655,7 +650,6 @@ bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery());
 const DEPOSIT_PRESETS = [1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
 const DEPOSIT_MIN = 1000;
 const DEPOSIT_MAX = 10000000;
-const QRIS_FEE_PERSEN = Number(process.env.QRIS_FEE_PERSEN ?? 0.7); // biaya qris dibebankan ke user, sesuaikan bila perlu
 
 function depositPickerKb() {
   const kb = new InlineKeyboard();
