@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  PEDIA OTP — Bot Telegram Nokos / OTP (versi user)
- *  Stack : Node.js 22 + grammy + Supabase + API dibanana.id + Doku (QRIS)
+ *  Stack : Node.js 22 + grammy + Supabase + API dibanana.id + VPay (QRIS)
  * ============================================================
  *
  *  FILE .env (satu folder dengan bot.js):
@@ -14,9 +14,8 @@
  *    MONITOR_CHANNEL_URL=https://t.me/monitornokos    # opsional, default sudah diisi
  *    MONITOR_CHANNEL_ID=@monitornokos                 # opsional; bot HARUS jadi admin channel ini
  *    CEKNOMOR_URL=https://t.me/Ceknomerdisini_bot     # opsional, default sudah diisi
- *    DOKU_CLIENT_ID=xxxx        # WAJIB diisi untuk deposit QRIS aktif (lihat blok DOKU QRIS di bawah)
- *    DOKU_SECRET_KEY=xxxx
- *    DOKU_BASE_URL=https://api-sandbox.doku.com   # ganti ke https://api.doku.com saat live
+ *    VPAY_API_KEY=vpay_xxxx     # API key VPay (deposit QRIS). Kalau kosong, dipakai key TES di blok VPAY di bawah
+ *    VPAY_BASE_URL=https://vitopediapay.com/api   # opsional
  *
  *  TABEL SUPABASE TAMBAHAN (buat dulu sebelum menu Deposit dipakai):
  *    create table otp_deposits (
@@ -27,6 +26,7 @@
  *      fee bigint not null default 0,
  *      total bigint not null,
  *      status text not null default 'pending',   -- pending | paid | expired | cancelled | failed
+ *      -- invoice_id = ID transaksi VPay (pg_xxx)
  *      chat_id bigint not null,
  *      message_id bigint,
  *      expired_at timestamptz,
@@ -34,7 +34,7 @@
  *      updated_at timestamptz not null default now()
  *    );
  *
- *  INSTALL :  npm i grammy @supabase/supabase-js dotenv qrcode
+ *  INSTALL :  npm i grammy @supabase/supabase-js dotenv
  *  JALANKAN:  pm2 start bot.js --name pedia-otp
  * ============================================================
  */
@@ -42,7 +42,6 @@
 require('dotenv').config();
 const { Bot, InlineKeyboard, InputFile } = require('grammy');
 const { createClient } = require('@supabase/supabase-js');
-const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
 
@@ -124,13 +123,80 @@ const VALID_CC = new Set([
   'YE','YT',
   'ZA','ZM','ZW',
 ]);
+/* ------------------------------------------------------------------
+ *  NEGARA SESUAI WEB PUSAT (dibanana.id -> "Layanan Luar Negeri")
+ *  Semua negara di daftar web pusat WAJIB muncul di menu Nomor Luar Negeri,
+ *  dengan nama yang sama persis seperti di web. Daftar hasil pengecekan otomatis
+ *  tetap dipakai & digabung (negara tambahan di luar daftar ini tetap muncul).
+ * ------------------------------------------------------------------ */
+const WEB_COUNTRIES = [
+  ['AF', 'Afganistan'], ['ZA', 'Afrika Selatan'], ['DZ', 'Aljazair'], ['US', 'Amerika Serikat'], ['SA', 'Arab Saudi'],
+  ['AR', 'Argentina'], ['AM', 'Armenia'], ['AU', 'Australia'], ['AT', 'Austria'], ['AZ', 'Azerbaijan'],
+  ['BH', 'Bahrain'], ['BD', 'Bangladesh'], ['NL', 'Belanda'], ['BY', 'Belarus'], ['BE', 'Belgia'],
+  ['BO', 'Bolivia'], ['BR', 'Brasil'], ['BG', 'Bulgaria'], ['CL', 'Chili'], ['DK', 'Denmark'],
+  ['EC', 'Ekuador'], ['EE', 'Estonia'], ['ET', 'Etiopia'], ['PH', 'Filipina'], ['FI', 'Finlandia'],
+  ['GE', 'Georgia'], ['GH', 'Ghana'], ['HK', 'Hong Kong'], ['HU', 'Hungaria'], ['IN', 'India'],
+  ['UK', 'Inggris Raya'], ['IQ', 'Irak'], ['IR', 'Iran'], ['IE', 'Irlandia'], ['IL', 'Israel'],
+  ['IT', 'Italia'], ['JP', 'Jepang'], ['DE', 'Jerman'], ['KH', 'Kamboja'], ['CM', 'Kamerun'],
+  ['CA', 'Kanada'], ['KZ', 'Kazakhstan'], ['KE', 'Kenya'], ['KG', 'Kirgizstan'], ['CO', 'Kolombia'],
+  ['KR', 'Korea Selatan'], ['HR', 'Kroasia'], ['KW', 'Kuwait'], ['LA', 'Laos'], ['LV', 'Latvia'],
+  ['LB', 'Lebanon'], ['LT', 'Lituania'], ['MY', 'Malaysia'], ['MA', 'Maroko'], ['MX', 'Meksiko'],
+  ['EG', 'Mesir'], ['MD', 'Moldova'], ['MN', 'Mongolia'], ['MM', 'Myanmar'], ['NP', 'Nepal'],
+  ['NG', 'Nigeria'], ['NO', 'Norwegia'], ['OM', 'Oman'], ['PK', 'Pakistan'], ['CI', 'Pantai Gading'],
+  ['PY', 'Paraguay'], ['PE', 'Peru'], ['PL', 'Polandia'], ['PT', 'Portugal'], ['FR', 'Prancis'],
+  ['QA', 'Qatar'], ['CZ', 'Republik Ceko'], ['RO', 'Romania'], ['RU', 'Rusia'], ['NZ', 'Selandia Baru'],
+  ['SN', 'Senegal'], ['RS', 'Serbia'], ['SG', 'Singapura'], ['SK', 'Slovakia'], ['SI', 'Slovenia'],
+  ['ES', 'Spanyol'], ['LK', 'Sri Lanka'], ['SE', 'Swedia'], ['CH', 'Swiss'], ['TW', 'Taiwan'],
+  ['TZ', 'Tanzania'], ['TH', 'Thailand'], ['CN', 'Tiongkok'], ['TN', 'Tunisia'], ['TR', 'Turki'],
+  ['UG', 'Uganda'], ['UA', 'Ukraina'], ['AE', 'Uni Emirat Arab'], ['UY', 'Uruguay'], ['UZ', 'Uzbekistan'],
+  ['VE', 'Venezuela'], ['VN', 'Vietnam'], ['JO', 'Yordania'], ['GR', 'Yunani'],
+];
+const WEB_CODES = WEB_COUNTRIES.map((c) => c[0].toLowerCase());
+const WEB_NAME = new Map(WEB_COUNTRIES.map(([c, n]) => [c === 'UK' ? 'GB' : c, n]));
+
+/* Kode telepon tiap negara -> dipakai untuk MEMASTIKAN nomor yang diterima benar-benar
+ * dari negara yang dipilih user (bukan +62 / negara lain). Negara yang tidak ada di tabel
+ * ini tidak diperiksa prefix-nya (tapi nomor +62 tetap selalu ditolak untuk negara asing). */
+const DIAL = {
+  AF: '93', ZA: '27', DZ: '213', SA: '966', AR: '54', AM: '374', AU: '61', AT: '43', AZ: '994', BH: '973',
+  BD: '880', NL: '31', BY: '375', BE: '32', BO: '591', BR: '55', BG: '359', CL: '56', DK: '45', EC: '593',
+  EE: '372', ET: '251', PH: '63', FI: '358', GE: '995', GH: '233', HK: '852', HU: '36', IN: '91', GB: '44',
+  IQ: '964', IR: '98', IE: '353', IL: '972', IT: '39', JP: '81', DE: '49', KH: '855', CM: '237', KE: '254',
+  KG: '996', CO: '57', KR: '82', HR: '385', KW: '965', LA: '856', LV: '371', LB: '961', LT: '370', MY: '60',
+  MA: '212', MX: '52', EG: '20', MD: '373', MN: '976', MM: '95', NP: '977', NG: '234', NO: '47', OM: '968',
+  PK: '92', CI: '225', PY: '595', PE: '51', PL: '48', PT: '351', FR: '33', QA: '974', CZ: '420', RO: '40',
+  NZ: '64', SN: '221', RS: '381', SG: '65', SK: '421', SI: '386', ES: '34', LK: '94', SE: '46', CH: '41',
+  TW: '886', TZ: '255', TH: '66', CN: '86', TN: '216', TR: '90', UG: '256', UA: '380', AE: '971', UY: '598',
+  UZ: '998', VE: '58', VN: '84', JO: '962', GR: '30',
+};
+// +1 dipakai bersama Amerika Serikat & Kanada -> dibedakan lewat kode area Kanada
+const CA_AREA = new Set(['204', '226', '236', '249', '250', '257', '263', '289', '306', '343', '354', '365', '367', '368',
+  '382', '403', '416', '418', '431', '437', '438', '450', '468', '474', '506', '514', '519', '548', '579', '581', '584',
+  '587', '604', '613', '639', '647', '672', '683', '705', '709', '742', '753', '778', '780', '782', '807', '819', '825',
+  '867', '873', '902', '905', '942']);
+// true = nomor cocok dengan negara yang diminta
+function phoneMatchesCountry(phone, country) {
+  const d = String(phone || '').replace(/\D/g, '');
+  if (!d) return false;
+  if (!country || String(country).toLowerCase() === 'id') return true;
+  if (d.startsWith('62')) return false;                       // nomor Indonesia tidak boleh lolos sebagai negara asing
+  let cc = String(country).toUpperCase();
+  if (cc === 'UK') cc = 'GB';
+  if (cc === 'US') return d.startsWith('1') && !CA_AREA.has(d.slice(1, 4));
+  if (cc === 'CA') return d.startsWith('1') && CA_AREA.has(d.slice(1, 4));
+  if (cc === 'RU') return /^7(?![67])/.test(d);
+  if (cc === 'KZ') return /^7[67]/.test(d);
+  const dial = DIAL[cc];
+  return dial ? d.startsWith(dial) : true;
+}
+
 function countryInfo(code) {           // -> [kode, bendera, nama] atau null untuk Indonesia / kode tak valid
   if (!code || code === 'id') return null;
   let cc = String(code).toUpperCase();
   if (cc === 'UK') cc = 'GB';
   if (!VALID_CC.has(cc)) return null;
   let n; try { n = dnId.of(cc); } catch { n = undefined; }
-  return [code, flagOf(cc), n && n !== cc ? n : cc];
+  return [code, flagOf(cc), WEB_NAME.get(cc) || (n && n !== cc ? n : cc)];
 }
 let negaraDb = {};                     // { at, ekonomi:[kode], premium:[kode], khusus:[kode] }
 try {
@@ -150,11 +216,14 @@ function markBadCountry(server, cc) {     // negara yang terbukti memberi nomor 
 }
 function countryEntries(server) {
   const bad = negaraDb.bad?.[server] || [];
-  const codes = (Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES).filter((c) => !bad.includes(c));
+  const base = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
+  // hasil pengecekan otomatis + semua negara dari daftar web pusat (tanpa duplikat)
+  let codes = [...new Set([...base, ...WEB_CODES].map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c));
+  if (codes.includes('gb') && codes.includes('uk')) codes = codes.filter((c) => c !== 'uk');
   return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
 }
 
-const CAND = [...VALID_CC].filter((c) => c !== 'ID');
+const CAND = [...VALID_CC, 'UK'].filter((c) => c !== 'ID');   // 'UK' ikut dicek (sebagian API memakai kode uk)
 
 let negaraRunning = false;
 async function probeServices(server) {   // kode layanan populer (WA, Telegram, FB, IG, TikTok, Google) untuk cek stok negara
@@ -319,75 +388,52 @@ function errText(r) {
   }
 }
 
-/* ============================== API DOKU (QRIS) ======================== */
-// ⚠️ PENTING — BACA DULU SEBELUM DIPAKAI TRANSAKSI SUNGGUHAN:
-// Bagian ini butuh Client ID + Secret Key asli dari akun Doku kamu, dan endpoint
-// di bawah mengikuti pola umum API Doku, tapi WAJIB kamu cocokkan dulu dengan
-// dokumentasi/contoh kode resmi dari dashboard Doku milikmu (nama field & endpoint
-// bisa berbeda tergantung produk Doku yang kamu pakai). Jangan aktifkan untuk
-// transaksi nyata sebelum berhasil dites di sandbox Doku.
-const { DOKU_CLIENT_ID, DOKU_SECRET_KEY } = process.env;
-const DOKU_BASE_URL = process.env.DOKU_BASE_URL || 'https://api-sandbox.doku.com';
-const DOKU_READY = !!(DOKU_CLIENT_ID && DOKU_SECRET_KEY);
-if (!DOKU_READY) {
-  console.error('⚠️ DOKU_CLIENT_ID / DOKU_SECRET_KEY belum diisi di .env — menu Deposit belum akan berfungsi sampai ini diisi.');
-}
+/* ============================== API VPAY (QRIS) ======================== */
+// Payment gateway: VPay (https://vitopediapay.com/api) — QRIS dinamis, cek status via polling.
+//   POST /pg/create {amount, ref_id}  -> data { id, amount, unique_code, total, qr_image(URL PNG), status }
+//   GET  /pg/check/:id                -> data { status: pending | paid | expired }
+// Total yang harus dibayar user = data.total (nominal + kode unik 0-100 dari VPay).
+// ⚠️ API key di bawah adalah key TES. Ganti dengan key sungguhan lewat .env (VPAY_API_KEY) atau edit baris ini.
+const VPAY_API_KEY = process.env.VPAY_API_KEY || 'vpay_42a0b77e653fd97ad114922fea623486dd30ed068df0cd5f';
+const VPAY_BASE_URL = (process.env.VPAY_BASE_URL || 'https://vitopediapay.com/api').replace(/\/+$/, '');
 
-async function dokuRequest(path, { method = 'POST', body } = {}) {
-  if (!DOKU_READY) return { ok: false, message: 'Pembayaran QRIS belum dikonfigurasi. Hubungi admin.' };
+async function vpayRequest(path, { method = 'GET', body } = {}) {
   try {
-    const res = await fetch(DOKU_BASE_URL + path, {
+    const res = await fetch(VPAY_BASE_URL + path, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Client-Id': DOKU_CLIENT_ID,
-        Authorization: `Bearer ${DOKU_SECRET_KEY}`,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${VPAY_API_KEY}` },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15000),
     });
-    let data; try { data = await res.json(); } catch { data = null; }
-    if (!res.ok || !data) return { ok: false, message: data?.message || `Doku error (HTTP ${res.status})` };
-    return { ok: true, data };
+    let j; try { j = await res.json(); } catch { j = null; }
+    if (!res.ok || !j || j.success === false) {
+      return { ok: false, status: res.status, message: j?.message || j?.error || `VPay error (HTTP ${res.status})` };
+    }
+    return { ok: true, data: j.data, raw: j };
   } catch (e) {
     return { ok: false, message: e.message };
   }
 }
 
-async function dokuCreateQris(uid, totalAmount) {
-  const invoiceId = `DEPO-${uid}-${Date.now().toString(36).toUpperCase()}`;
-  const r = await dokuRequest('/qris/v1.0/qr-mpm-generate', {
-    body: {
-      partnerReferenceNo: invoiceId,
-      amount: { value: `${totalAmount}.00`, currency: 'IDR' },
-      validityPeriod: new Date(Date.now() + 20 * 60000).toISOString(),
-    },
-  });
+async function vpayCreateQris(uid, amount) {
+  const refId = `DEPO-${uid}-${Date.now().toString(36).toUpperCase()}`.slice(0, 50);
+  const r = await vpayRequest('/pg/create', { method: 'POST', body: { amount, ref_id: refId } });
   if (!r.ok) return { ok: false, message: r.message };
-  const qrString = r.data.qrContent || r.data.qr_string || r.data.qrisUrl;
-  if (!qrString) return { ok: false, message: 'Respons Doku tidak berisi data QR.' };
-  return {
-    ok: true,
-    invoiceId,
-    qrString,
-    expiredAt: r.data.validityPeriod || new Date(Date.now() + 20 * 60000).toISOString(),
-  };
+  const d = r.data;
+  if (!d || !d.id || !d.qr_image) {
+    return { ok: false, message: 'Respons VPay tidak berisi id / qr_image: ' + JSON.stringify(r.raw).slice(0, 200) };
+  }
+  const total = Number(d.total) || (amount + (Number(d.unique_code) || 0));
+  return { ok: true, id: String(d.id), qrImage: String(d.qr_image), total };
 }
 
-async function dokuCheckStatus(invoiceId) {
-  const r = await dokuRequest('/qris/v1.0/qr-mpm-query', { body: { partnerReferenceNo: invoiceId } });
+async function vpayCheckStatus(id) {
+  const r = await vpayRequest(`/pg/check/${encodeURIComponent(id)}`);
   if (!r.ok) return { ok: false };
-  const raw = String(r.data.transactionStatusDesc || r.data.status || '').toLowerCase();
-  let status = 'pending';
-  if (raw.includes('success') || raw.includes('paid') || raw.includes('settlement')) status = 'paid';
-  else if (raw.includes('expire')) status = 'expired';
-  else if (raw.includes('cancel')) status = 'cancelled';
-  else if (raw.includes('fail') || raw.includes('deny')) status = 'failed';
-  return { ok: true, status };
-}
-
-async function dokuCancelQris(invoiceId) {
-  return dokuRequest('/qris/v1.0/qr-mpm-cancel', { body: { partnerReferenceNo: invoiceId } });
+  const raw = String(r.data?.status || '').toLowerCase();
+  if (raw === 'paid') return { ok: true, status: 'paid' };
+  if (raw === 'expired') return { ok: true, status: 'expired' };
+  return { ok: true, status: 'pending' };
 }
 
 /* ============================ SIARAN MONITOR =========================== */
@@ -605,7 +651,7 @@ bot.callbackQuery('home', async (ctx) => {
 
 bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery());
 
-/* ============================ DEPOSIT (QRIS DOKU) ===================== */
+/* ============================ DEPOSIT (QRIS VPAY) ===================== */
 const DEPOSIT_PRESETS = [1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
 const DEPOSIT_MIN = 1000;
 const DEPOSIT_MAX = 10000000;
@@ -660,6 +706,9 @@ bot.callbackQuery(/^depn:(\d+)$/, async (ctx) => {
   await startDeposit(ctx, Number(ctx.match[1]));
 });
 
+const DEPOSIT_TTL_MIN = 20;            // batas waktu bayar di bot (QRIS VPay aktif 24 jam; bayar telat tetap dikreditkan oleh penyapu di bawah)
+const cancelledDep = new Set();       // id deposit yang dibatalkan user -> polling berhenti
+
 function depositInvoiceText(row, status) {
   const exp = new Date(row.expired_at).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour12: false }).replace(/\./g, ':');
   if (status === 'paid') {
@@ -679,6 +728,7 @@ function depositInvoiceText(row, status) {
       'Silakan buat invoice deposit baru lewat menu Deposit.',
     ].join('\n');
   }
+  const unik = Math.max(0, Number(row.total) - Number(row.nominal) - Number(row.fee));
   return [
     '📱 <b>INVOICE QRIS</b>', LINE,
     `🧾 ID Transaksi : <code>${esc(row.invoice_id)}</code>`,
@@ -686,7 +736,8 @@ function depositInvoiceText(row, status) {
     `⏰ Expired : ${exp} WIB`, LINE,
     '<b>RINCIAN PEMBAYARAN</b>',
     `💵 Nominal Topup : ${rp(row.nominal)}`,
-    `💸 Biaya QRIS : ${rp(row.fee)}`, LINE,
+    `💸 Biaya QRIS : ${rp(row.fee)}`,
+    ...(unik > 0 ? [`🔢 Kode Unik : ${rp(unik)}`] : []), LINE,
     `💰 Total Bayar : <b>${rp(row.total)}</b>`,
     `🏦 Saldo Masuk : <b>${rp(row.nominal)}</b>`, LINE,
     '⏳ <i>Menunggu pembayaran...</i>',
@@ -694,24 +745,29 @@ function depositInvoiceText(row, status) {
   ].join('\n');
 }
 
-async function showDepositInvoice(ctx, row, qrString) {
+async function showDepositInvoice(ctx, row, qrImageUrl) {
   const kb = new InlineKeyboard().text('❌ Batalkan Pembayaran', `depx:${row.id}`).row().text('🏠 Menu Utama', 'home');
   const capt = depositInvoiceText(row, 'pending');
+  // QR dari VPay berupa URL gambar: diunduh dulu supaya Telegram pasti bisa menampilkannya.
+  let photo = qrImageUrl;
   try {
-    const png = await QRCode.toBuffer(qrString, { width: 512, margin: 1 });
-    const m = await bot.api.sendPhoto(ctx.chat.id, new InputFile(png, 'qris.png'), {
-      caption: capt, parse_mode: 'HTML', reply_markup: kb,
-    });
-    await db.from('otp_deposits').update({ message_id: m.message_id }).eq('id', row.id);
-    row.message_id = m.message_id;
-    row.is_photo = true;
+    const res = await fetch(qrImageUrl, { signal: AbortSignal.timeout(15000) });
+    if (res.ok) photo = new InputFile(Buffer.from(await res.arrayBuffer()), 'qris.png');
+  } catch (e) { console.error('unduh QR VPay gagal, kirim lewat URL:', e.message); }
+  let m;
+  try {
+    m = await bot.api.sendPhoto(ctx.chat.id, photo, { caption: capt, parse_mode: 'HTML', reply_markup: kb });
   } catch (e) {
     console.error('kirim QR gagal:', e.message);
-    const m = await bot.api.sendMessage(ctx.chat.id, capt, { parse_mode: 'HTML', reply_markup: kb });
-    await db.from('otp_deposits').update({ message_id: m.message_id }).eq('id', row.id);
-    row.message_id = m.message_id;
-    row.is_photo = false;
+    m = await bot.api.sendMessage(ctx.chat.id, `${capt}\n\n🔗 <a href="${esc(qrImageUrl)}">Buka gambar QRIS</a>`, {
+      parse_mode: 'HTML', reply_markup: kb, link_preview_options: { is_disabled: true },
+    });
   }
+  await db.from('otp_deposits').update({ message_id: m.message_id }).eq('id', row.id);
+  row.message_id = m.message_id;
+  // hapus pesan "Membuat invoice..." supaya tidak menggantung di atas invoice
+  const old = ctx.callbackQuery?.message?.message_id;
+  if (old && old !== m.message_id) bot.api.deleteMessage(ctx.chat.id, old).catch(() => {});
 }
 
 async function startDeposit(ctx, nominal) {
@@ -724,36 +780,37 @@ async function startDeposit(ctx, nominal) {
   }
   await render(ctx, '⏳ <b>Membuat invoice QRIS...</b>\nMohon tunggu sebentar.');
   const fee = Math.ceil((nominal * QRIS_FEE_PERSEN) / 100);
-  const total = nominal + fee;
-  const inv = await dokuCreateQris(ctx.from.id, total);
+  const inv = await vpayCreateQris(ctx.from.id, nominal + fee);   // VPay menambah kode unik -> inv.total
   if (!inv.ok) {
     console.error('deposit gagal dibuat:', inv.message);
     return render(ctx, '⚠️ <b>Gagal membuat invoice deposit</b>\n\nLayanan pembayaran sedang bermasalah. Coba lagi sebentar lagi.',
       new InlineKeyboard().text('🔄 Coba Lagi', `depn:${nominal}`).row().text('⬅️ Kembali', 'dep'));
   }
+  const expiredAt = new Date(Date.now() + DEPOSIT_TTL_MIN * 60000).toISOString();
   const { data: row, error } = await db.from('otp_deposits').insert({
-    user_id: ctx.from.id, invoice_id: inv.invoiceId, nominal, fee, total,
-    status: 'pending', chat_id: ctx.chat.id, expired_at: inv.expiredAt,
+    user_id: ctx.from.id, invoice_id: inv.id, nominal, fee, total: inv.total,
+    status: 'pending', chat_id: ctx.chat.id, expired_at: expiredAt,
   }).select().single();
   if (error || !row) {
     console.error('insert deposit gagal', error?.message);
+    notifyAdmins(`🚨 Invoice VPay ${inv.id} (user ${ctx.from.id}, Rp${inv.total}) dibuat tapi gagal disimpan ke DB. Jika user bayar, tambah saldo manual dengan /addsaldo.`);
     return render(ctx, '⚠️ Terjadi gangguan saat menyimpan transaksi deposit. Hubungi admin.', homeBtn());
   }
-  await showDepositInvoice(ctx, row, inv.qrString);
+  await showDepositInvoice(ctx, row, inv.qrImage);
   watchDeposit(row);
 }
 
 bot.callbackQuery(/^depx:(\d+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
   const { data: row } = await db.from('otp_deposits').select('*').eq('id', Number(ctx.match[1])).eq('user_id', ctx.from.id).maybeSingle();
   if (!row || row.status !== 'pending') {
     return ctx.answerCallbackQuery({ text: 'Transaksi ini sudah tidak bisa dibatalkan.', show_alert: true });
   }
+  await ctx.answerCallbackQuery();
   const { data } = await db.from('otp_deposits')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('id', row.id).eq('status', 'pending').select().maybeSingle();
   if (!data) return;
-  dokuCancelQris(data.invoice_id).catch(() => {});
+  cancelledDep.add(data.id);
   await editDepositMessage(data, 'cancelled');
 });
 
@@ -775,42 +832,79 @@ async function editDepositMessage(row, status) {
   }
 }
 
+// Tandai deposit lunas (atomik, anti kredit ganda) lalu tambah saldo user.
+async function settleDepositPaid(row, fromStatuses, late = false) {
+  const { data } = await db.from('otp_deposits')
+    .update({ status: 'paid', updated_at: new Date().toISOString() })
+    .eq('id', row.id).in('status', fromStatuses).select().maybeSingle();
+  if (!data) return false;                       // sudah diproses di tempat lain
+  const ok = await credit(data.user_id, data.nominal);
+  if (!ok) notifyAdmins(`🚨 Deposit ${data.invoice_id} user ${data.user_id} ${rp(data.nominal)} SUDAH DIBAYAR tapi gagal menambah saldo. Tambah manual: /addsaldo ${data.user_id} ${data.nominal}`);
+  await editDepositMessage(data, 'paid');
+  if (late) {
+    bot.api.sendMessage(data.chat_id, `✅ Pembayaran deposit ${rp(data.nominal)} berhasil diterima. Saldo kamu sudah bertambah.`).catch(() => {});
+  }
+  postMonitorDeposit(data).catch(() => {});
+  return true;
+}
+
+async function settleDepositEnd(row, status) {
+  const { data } = await db.from('otp_deposits')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', row.id).eq('status', 'pending').select().maybeSingle();
+  if (data) await editDepositMessage(data, status);
+}
+
 const watchingDep = new Set();
 async function watchDeposit(row) {
   if (watchingDep.has(row.id)) return;
   watchingDep.add(row.id);
-  const t0 = Date.now();
-  const limit = 30 * 60000;
+  const deadline = new Date(row.expired_at).getTime() + 60000;   // + 1 menit cadangan
   try {
-    while (Date.now() - t0 < limit) {
+    while (Date.now() < deadline) {
       await sleep(POLL_MS);
-      const st = await dokuCheckStatus(row.invoice_id);
+      if (cancelledDep.has(row.id)) return;      // dibatalkan user (kalau tetap dibayar, penyapu yang mengkreditkan)
+      const st = await vpayCheckStatus(row.invoice_id);
       if (!st.ok) continue;
-      if (st.status === 'paid') {
-        const { data } = await db.from('otp_deposits')
-          .update({ status: 'paid', updated_at: new Date().toISOString() })
-          .eq('id', row.id).eq('status', 'pending').select().maybeSingle();
-        if (data) {
-          await credit(data.user_id, data.nominal);
-          await editDepositMessage(data, 'paid');
-          postMonitorDeposit(data).catch(() => {});
-        }
-        return;
-      }
-      if (['expired', 'cancelled', 'failed'].includes(st.status)) {
-        const { data } = await db.from('otp_deposits')
-          .update({ status: st.status, updated_at: new Date().toISOString() })
-          .eq('id', row.id).eq('status', 'pending').select().maybeSingle();
-        if (data) await editDepositMessage(data, st.status);
-        return;
-      }
+      if (st.status === 'paid') { await settleDepositPaid(row, ['pending']); return; }
+      if (st.status === 'expired') { await settleDepositEnd(row, 'expired'); return; }
     }
-    const { data } = await db.from('otp_deposits')
-      .update({ status: 'expired', updated_at: new Date().toISOString() })
-      .eq('id', row.id).eq('status', 'pending').select().maybeSingle();
-    if (data) await editDepositMessage(data, 'expired');
+    // waktu habis: cek terakhir sebelum dinyatakan kedaluwarsa
+    const st = await vpayCheckStatus(row.invoice_id);
+    if (st.ok && st.status === 'paid') { await settleDepositPaid(row, ['pending']); return; }
+    await settleDepositEnd(row, 'expired');
+  } catch (e) {
+    console.error('watchDeposit error', row.id, e.message);
   } finally {
     watchingDep.delete(row.id);
+    cancelledDep.delete(row.id);
+  }
+}
+
+// Penyapu pembayaran telat: invoice yang sudah dibatalkan / kedaluwarsa di bot tapi ternyata
+// tetap dibayar user (QRIS VPay masih aktif 24 jam) tetap dikreditkan otomatis.
+let sweepN = 0;
+let sweeping = false;
+async function sweepLateDeposits() {
+  if (sweeping) return;
+  sweeping = true;
+  try {
+    sweepN++;
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { data } = await db.from('otp_deposits').select('*')
+      .in('status', ['cancelled', 'expired']).gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(60);
+    for (const d of data || []) {
+      const ageMin = (Date.now() - new Date(d.created_at).getTime()) / 60000;
+      if (ageMin > 60 && sweepN % 10 !== 0) continue;      // invoice > 1 jam cukup dicek tiap ± 30 menit
+      const st = await vpayCheckStatus(d.invoice_id);
+      if (st.ok && st.status === 'paid') await settleDepositPaid(d, ['cancelled', 'expired'], true);
+      await sleep(300);
+    }
+  } catch (e) {
+    console.error('sweepLateDeposits error:', e.message);
+  } finally {
+    sweeping = false;
   }
 }
 
@@ -833,7 +927,7 @@ bot.callbackQuery('help', async (ctx) => {
     '💰 <b>Cara Deposit Saldo</b>', LINE,
     '1️⃣ Tekan menu <b>Deposit</b> di halaman utama',
     '2️⃣ Pilih salah satu nominal yang tersedia, atau tekan <b>✏️ Nominal Lain</b> untuk mengetik jumlah sendiri (contoh: <code>75000</code>)',
-    '3️⃣ Bot akan membuatkan <b>kode QRIS</b> otomatis, lengkap dengan rincian nominal, biaya QRIS, dan total yang harus dibayar',
+    '3️⃣ Bot akan membuatkan <b>kode QRIS</b> otomatis, lengkap dengan rincian nominal, biaya QRIS, kode unik, dan total yang harus dibayar',
     '4️⃣ Buka aplikasi e-wallet / m-banking apa pun yang mendukung QRIS (Dana, OVO, GoPay, ShopeePay, mobile banking, dll), lalu <b>scan kode QR</b> tersebut',
     '5️⃣ Bayar <b>tepat sejumlah</b> nominal "Total Bayar" yang tertera — jangan dibulatkan sendiri',
     '6️⃣ Saldo masuk otomatis ke akun kamu begitu pembayaran terverifikasi, tanpa perlu konfirmasi manual',
@@ -1341,13 +1435,14 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
       return { id };
     };
     const r = await bn('/order', { method: 'POST', body: body(cur.id) });
-    // PENGAMAN: minta negara luar tapi pusat memberi nomor +62 -> batalkan otomatis, saldo user dikembalikan.
-    if (r.ok && (s.country || 'id') !== 'id' && String(r.phone_number || '').replace(/\D/g, '').startsWith('62')) {
+    // PENGAMAN: minta negara luar tapi nomor yang diberikan pusat BUKAN nomor negara itu (mis. +62) ->
+    // batalkan otomatis di pusat, saldo user dikembalikan, negara disembunyikan dari daftar.
+    if (r.ok && (s.country || 'id') !== 'id' && !phoneMatchesCountry(r.phone_number, s.country)) {
       await credit(uid, jual);
       markBadCountry(s.server, s.country);
-      notifyAdmins(`🚨 Order pusat #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} adalah +62. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
+      notifyAdmins(`🚨 Order pusat #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} BUKAN nomor negara itu. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
       cancelProviderOrder(r.order_id).catch(() => {});
-      return render(ctx, '⚠️ <b>Order dibatalkan otomatis</b>\n\nServer pusat memberi nomor Indonesia (+62), bukan nomor negara yang kamu pilih.\n\n💸 Saldo kamu tidak terpotong.',
+      return render(ctx, '⚠️ <b>Order dibatalkan otomatis</b>\n\nServer pusat memberi nomor yang bukan dari negara yang kamu pilih.\n\n💸 Saldo kamu tidak terpotong.',
         new InlineKeyboard().text('🌍 Pilih Negara Lain', 'reg:ex').row().text('🏠 Menu Utama', 'home'));
     }
     if (r.ok && (s.country || 'id') !== 'id' && r.country && String(r.country).toLowerCase() !== String(s.country).toLowerCase()) {
@@ -1506,6 +1601,10 @@ async function resumePending() {
   const { data } = await db.from('otp_orders').select('*').in('status', ['pending', 'resend_wait']);
   (data || []).forEach((o) => watchOrder(o, o.status === 'resend_wait' ? 2 : 1));
   console.log(`🔄 Melanjutkan ${data?.length || 0} order yang masih menunggu OTP`);
+  // deposit QRIS yang masih pending saat bot restart juga harus terus dipantau (kalau tidak, saldo tidak masuk)
+  const { data: deps } = await db.from('otp_deposits').select('*').eq('status', 'pending');
+  (deps || []).forEach((d) => watchDeposit(d));
+  console.log(`🔄 Melanjutkan ${deps?.length || 0} deposit yang masih menunggu pembayaran`);
 }
 
 bot.api.setMyCommands([{ command: 'start', description: 'Buka menu utama' }]).catch(() => {});
@@ -1516,6 +1615,7 @@ bot.start({
   onStart: async (me) => {
     console.log(`✅ ${BRAND} berjalan sebagai @${me.username}`);
     await resumePending();
+    setInterval(() => sweepLateDeposits(), 3 * 60000).unref();               // kreditkan deposit yang dibayar telat
     setTimeout(() => refreshNegara(false), 20000);                           // cek daftar negara setelah bot siap
     setInterval(() => refreshNegara(false), 6 * 3600 * 1000).unref();        // dan diperiksa tiap 6 jam (diperbarui bila >24 jam)
   },
