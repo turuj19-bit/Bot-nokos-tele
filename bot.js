@@ -573,14 +573,14 @@ async function isChannelMember(uid, force = false) {
 
 function joinGateKeyboard() {
   return new InlineKeyboard()
-    .url('📢 Join Channel Official', CHANNEL_URL).row()
+    .url('📢 Join Channel', CHANNEL_URL).row()
     .text('✅ Saya Sudah Join', 'joincheck');
 }
 
 async function showJoinGate(ctx, verifyFailed = false) {
   const text = verifyFailed
-    ? '⚠️ <b>Verifikasi Channel Gagal</b>\n\nBot belum bisa memeriksa status membership kamu. Coba tekan <b>Saya Sudah Join</b> lagi beberapa saat lagi.'
-    : '🔒 <b>Akses Bot Terkunci</b>\n\nUntuk menggunakan <b>PEDIA OTP</b>, kamu wajib bergabung ke Channel Official terlebih dahulu.\n\nSetelah join, tekan <b>Saya Sudah Join</b>. Jika nanti kamu keluar channel, akses bot otomatis terkunci lagi.';
+    ? '⏳ <b>Belum Bisa Dicek</b>\n\nMaaf, kami belum bisa memastikan kamu sudah join channel.\n\nCoba tekan <b>✅ Saya Sudah Join</b> lagi sebentar lagi ya. Kalau masih gagal, hubungi admin.'
+    : '👋 <b>Selamat datang di PEDIA OTP!</b>\n\nSebelum mulai, join channel resmi kami dulu ya. Di sana ada info promo, update layanan, dan pengumuman penting.\n\n1️⃣ Tekan <b>Join Channel</b>\n2️⃣ Kembali ke sini, lalu tekan <b>Saya Sudah Join</b>';
   try {
     if (ctx.callbackQuery?.message?.message_id) {
       await bot.api.editMessageText(ctx.chat.id, ctx.callbackQuery.message.message_id, text, { parse_mode: 'HTML', reply_markup: joinGateKeyboard() });
@@ -1176,9 +1176,16 @@ bot.callbackQuery('reg:ex', async (ctx) => {
   await ctx.answerCallbackQuery();
   const s = S(ctx.from.id);
   s.exServer = null; s.cfilter = null; s.filter = null; s.search = null; s.searchCountry = false;
+  if (SERVERS_EX.length === 1) {   // hanya 1 server luar negeri -> langsung ke daftar negara
+    s.exServer = SERVERS_EX[0];
+    return showCountries(ctx.chat.id, ctx.callbackQuery.message.message_id, ctx.from.id, 0);
+  }
   const v = pickerView(true);
   await render(ctx, v.text, v.kb);
 });
+
+// kalau server luar negeri cuma satu, tombol kembali langsung ke menu Buat Order
+const EX_BACK = SERVERS_EX.length === 1 ? 'ord' : 'reg:ex';
 
 async function showCountries(chatId, msgId, uid, page) {
   const s = S(uid);
@@ -1188,7 +1195,7 @@ async function showCountries(chatId, msgId, uid, page) {
   const head = `${SERVERS[server].label.split(' ')[0]} <b>Server ${SERVERS[server].name}</b>`;
   if (!base.length) {
     return edit(chatId, msgId, `🌍 <b>Nomor Luar Negeri</b>\n${head}\n${LINE}\nBelum ada negara yang tersedia di server ini. Coba server lain.`,
-      new InlineKeyboard().text('⬅️ Kembali', 'reg:ex'));
+      new InlineKeyboard().text('⬅️ Kembali', EX_BACK));
   }
   const all = s.cfilter || base;
   const pg = paginate(all, page, PER_PAGE);
@@ -1200,7 +1207,7 @@ async function showCountries(chatId, msgId, uid, page) {
   if (pg.items.length % 2 === 1) kb.row();
   if (!pg.items.length) kb.text('Negara tidak ditemukan', 'noop').row();
   navRow(kb, pg.page, pg.total, 'ctp');
-  kb.text('⬅️ Kembali', 'reg:ex');
+  kb.text('⬅️ Kembali', EX_BACK);
   const judul = s.cfilter ? `🔍 Hasil: <i>${esc(s.cfilterQ)}</i>` : 'Pilih negara:';
   const info = negaraRunning && !Array.isArray(negaraDb[server]) ? '\n<i>ℹ️ Daftar negara sedang diperbarui.</i>' : '';
   await edit(chatId, msgId, [`🌍 <b>Nomor Luar Negeri</b>`, head, LINE, `${judul} (${pg.page + 1}/${pg.total})${info}`].join('\n'), kb);
@@ -1779,6 +1786,18 @@ async function resumePending() {
 }
 
 bot.api.setMyCommands([{ command: 'start', description: 'Buka menu utama' }]).catch(() => {});
+
+// Jumlah pengguna ditampilkan di profil bot (deskripsi singkat). Label "pengguna bulanan" bawaan Telegram diisi Telegram sendiri.
+let lastShortDesc = '';
+async function updateBotProfile() {
+  try {
+    const st = await getStats();
+    const desc = `Layanan nomor OTP instan & terpercaya. 👥 ${st.users.toLocaleString('id-ID')} pengguna terdaftar`;
+    if (desc === lastShortDesc) return;
+    await bot.api.setMyShortDescription(desc.slice(0, 120));
+    lastShortDesc = desc;
+  } catch (e) { console.error('update profil bot gagal:', e.message); }
+}
 process.once('SIGINT', () => bot.stop());
 process.once('SIGTERM', () => bot.stop());
 
@@ -1786,6 +1805,8 @@ bot.start({
   onStart: async (me) => {
     console.log(`✅ ${BRAND} berjalan sebagai @${me.username}`);
     await resumePending();
+    setTimeout(() => updateBotProfile(), 10000);
+    setInterval(() => updateBotProfile(), 30 * 60000).unref();                 // update angka pengguna di profil bot tiap 30 menit
     setInterval(() => sweepLateDeposits(), 3 * 60000).unref();               // kreditkan deposit yang dibayar telat
     setTimeout(() => checkCenterBalance(), 15000);                            // cek saldo pusat setelah bot siap
     setInterval(() => checkCenterBalance(), CENTER_BALANCE_CHECK_MS).unref(); // alarm saldo pusat tiap 10 menit saat habis
