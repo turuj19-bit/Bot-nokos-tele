@@ -270,22 +270,19 @@ function foreignOnly(r, country, base, server) {
   const cc = normCc(country);
   if (!r?.ok) return [];
   if (r.country && normCc(r.country) !== cc) return [];
-  // Server khusus luar negeri (wa_luar) memang HANYA menjual nomor asing, jadi produknya tidak perlu
-  // dibandingkan dengan produk Indonesia (dulu perbandingan ini membuang SEMUA produk -> "belum tersedia").
-  // Pengaman nomor +62 tetap jalan saat order (phoneMatchesCountry), saldo otomatis kembali.
-  const dedicated = !!server && SERVERS_EX.includes(server);
   return (r.providers || []).filter((p) => {
     if (!(p.stock > 0)) return false;
+    // produk HARUS berasal dari server yang diminta (wa_luar). Kalau pusat membalas produk server Ekonomi dll
+    // (id produk berisi s:"ekonomi") itu nomor +62 dengan label negara palsu -> dibuang
+    if (server) {
+      if (p.server && String(p.server) !== server) return false;
+      const dd = decId(p.id);
+      if (dd && (dd.s || dd.server) && String(dd.s || dd.server) !== server) return false;
+    }
     if (p.country && normCc(p.country) !== cc) return false;
     const d = decId(p.id);
     if (d && d.c && normCc(d.c) !== cc) return false;
-    if (dedicated) return true;
-    // server Indonesia (ekonomi/premium/khusus): produk wajib dari server itu & bukan salinan produk Indonesia
-    if (server) {
-      if (p.server && String(p.server) !== server) return false;
-      if (d && (d.s || d.server) && String(d.s || d.server) !== server) return false;
-    }
-    return !base.has(sigOf(p));
+    return !base.has(sigOf(p));          // produk salinan Indonesia dibuang
   });
 }
 
@@ -1784,13 +1781,29 @@ bot.command('updatenegara', async (ctx) => {
 // /cekapi <kode negara> <kode layanan>  -> tampilkan jawaban mentah API (hanya baca harga, TIDAK membeli)
 bot.command('cekapi', async (ctx) => {
   if (!ADMIN_IDS.includes(ctx.from.id)) return;
-  const [cc, svc] = String(ctx.match || '').trim().toLowerCase().split(/\s+/);
-  if (!cc || !svc) return ctx.reply('Format: /cekapi <kode negara> <kode layanan>\nContoh: /cekapi cl wa');
-  const r = await bn('/prices', { query: { server: 'wa_luar', service: svc, country: cc } });
-  const base = await bn('/prices', { query: { server: 'wa_luar', service: svc, country: 'id' } });
+  const [cc, svc, srv] = String(ctx.match || '').trim().toLowerCase().split(/\s+/);
+  if (!cc || !svc) return ctx.reply('Format: /cekapi <kode negara> <kode layanan> [server]\nContoh: /cekapi za wa wa_luar');
+  const server = srv || 'wa_luar';
+  const r = await bn('/prices', { query: { server, service: svc, country: cc } });
+  const base = await bn('/prices', { query: { server, service: svc, country: 'id' } });
   const view = (x) => JSON.stringify({ ...x, providers: (x.providers || []).slice(0, 3).map((p) => ({ ...p, _id_terbaca: decId(p.id) })) }, null, 1).slice(0, 1700);
-  await ctx.reply(`negara=${cc} layanan=${svc}\n${view(r)}`);
+  await ctx.reply(`server=${server} negara=${cc} layanan=${svc}\n${view(r)}`);
   await ctx.reply(`PEMBANDING negara=id\n${view(base)}`);
+});
+
+// /cekserver [server] -> tampilkan daftar layanan mentah dari pusat untuk server itu (hanya baca)
+bot.command('cekserver', async (ctx) => {
+  if (!ADMIN_IDS.includes(ctx.from.id)) return;
+  const server = String(ctx.match || '').trim().toLowerCase() || 'wa_luar';
+  const r = await bn('/services', { query: { server } });
+  await ctx.reply(`server=${server}\n${JSON.stringify(r).slice(0, 3500)}`);
+});
+
+// /resetnegara -> buka lagi semua negara yang sedang dijeda 30 menit (tanpa menunggu)
+bot.command('resetnegara', async (ctx) => {
+  if (!ADMIN_IDS.includes(ctx.from.id)) return;
+  badUntil.clear();
+  await ctx.reply('✅ Jeda semua negara dihapus.');
 });
 
 bot.command('addsaldo', async (ctx) => {
