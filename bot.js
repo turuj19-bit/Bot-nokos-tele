@@ -212,10 +212,9 @@ function markBadCountry(server, cc) {     // negara yang terbukti memberi nomor 
 }
 function countryEntries(server) {
   const bad = negaraDb.bad?.[server] || [];
-  const base = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
-  // hasil pengecekan otomatis + semua negara dari daftar web pusat (tanpa duplikat)
-  let codes = [...new Set([...base, ...WEB_CODES].map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c));
-  if (codes.includes('gb') && codes.includes('uk')) codes = codes.filter((c) => c !== 'uk');
+  // HANYA negara yang ada di daftar web pusat (dibanana.id) -> jumlah & halaman sama persis dengan web.
+  // Negara tambahan hasil pengecekan otomatis TIDAK ditampilkan lagi.
+  const codes = [...new Set(WEB_CODES.map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c));
   return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
 }
 
@@ -828,6 +827,14 @@ bot.callbackQuery(/^depx:(\d+)$/, async (ctx) => {
 async function editDepositMessage(row, status) {
   const text = depositInvoiceText(row, status);
   const kb = new InlineKeyboard().text('💰 Deposit Lagi', 'dep').row().text('🏠 Menu Utama', 'home');
+  if (status === 'cancelled' || status === 'expired' || status === 'failed') {
+    // QRIS tidak boleh tampil lagi: hapus pesan foto QR, lalu kirim pesan teks status biasa.
+    if (row.message_id) await bot.api.deleteMessage(row.chat_id, row.message_id).catch(() => {});
+    try {
+      await bot.api.sendMessage(row.chat_id, text, { parse_mode: 'HTML', reply_markup: kb });
+      return;
+    } catch (e) { console.error('kirim status deposit gagal:', e.message); }
+  }
   try {
     await bot.api.editMessageCaption(row.chat_id, row.message_id, { caption: text, parse_mode: 'HTML', reply_markup: kb });
   } catch (e) {
@@ -1219,6 +1226,24 @@ bot.callbackQuery(/^sv:(\w+):(.+)$/, async (ctx) => {
   await loadPrices(ctx, server, code);
 });
 
+// Ambil daftar harga terbaru dari pusat -> hanya produk yang stoknya benar-benar ready (stok > 0).
+// Mengembalikan null kalau pusat error (pakai daftar lama).
+async function freshProviders(s) {
+  try {
+    const country = s.country || 'id';
+    const r = await bn('/prices', { query: { server: s.server, service: s.service, country } });
+    if (!r?.ok) return null;
+    const list = country !== 'id'
+      ? foreignOnly(r, country, await baselineIds(s.server, s.service))
+      : (r.providers || []).filter((p) => p.stock > 0);
+    return list.filter((p) => p.stock > 0).sort((a, b) => a.price_idr - b.price_idr);
+  } catch { return null; }
+}
+function emptyStockView(s) {
+  return ['😔 <b>Stok ' + esc(s.serviceName || '') + ' sedang kosong</b>\n\nCoba server lain atau kembali lagi nanti.',
+    new InlineKeyboard().text('⬅️ Kembali', svReopen(s, s.server))];
+}
+
 async function showPrices(ctx, page) {
   const s = S(ctx.from.id);
   if (!s.providers) return expired(ctx);
@@ -1248,14 +1273,34 @@ const expired = (ctx) =>
 
 bot.callbackQuery(/^prp:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
+  const s = S(ctx.from.id);
+  if (s.providers) {
+    const fresh = await freshProviders(s);       // buang stok yang sudah habis dari daftar
+    if (fresh) {
+      if (!fresh.length) { const [t2, k2] = emptyStockView(s); return render(ctx, t2, k2); }
+      s.providers = fresh;
+    }
+  }
   await showPrices(ctx, Number(ctx.match[1]));
 });
 
 bot.callbackQuery(/^pr:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const s = S(ctx.from.id);
-  const p = s.providers?.[Number(ctx.match[1])];
+  let p = s.providers?.[Number(ctx.match[1])];
   if (!p) return expired(ctx);
+  // Cek ulang stok pilihan ini; kalau sudah habis, daftar diperbarui & pilihan itu hilang dari menu.
+  const fresh = await freshProviders(s);
+  if (fresh) {
+    const cur = fresh.find((x) => x.id === p.id && x.price_idr <= p.price_idr);
+    if (!cur) {
+      s.providers = fresh;
+      if (!fresh.length) { const [t2, k2] = emptyStockView(s); return render(ctx, t2, k2); }
+      return showPrices(ctx, 0);
+    }
+    p = cur;
+    s.providers[Number(ctx.match[1])] = cur;
+  }
   const [mk, u] = await Promise.all([getMarkup(), getUser(ctx.from.id)]);
   const jual = calcJual(p.price_idr, mk);
   const cukup = u.saldo >= jual;
@@ -1432,7 +1477,11 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     // Dulu ada cadangan "produk lain dengan harga sama" -> inilah yang membuat nomor acak.
     const cur = list.find((x) => x.id === p.id && x.price_idr <= p.price_idr);
     if (!cur) {
-      return render(ctx, '😔 <b>Stok sedang habis</b>\n\nStok atau harga pilihan ini baru saja berubah, jadi order dibatalkan sebelum saldo terpotong. Silakan muat ulang harga dan pilih lagi.', reload);
+      // Stok pilihan ini baru habis: perbarui daftar (yang habis dihapus) dan tampilkan lagi menu harga.
+      const rest = list.filter((x) => x.stock > 0).sort((a, b) => a.price_idr - b.price_idr);
+      s.providers = rest;
+      if (!rest.length) { const [t2, k2] = emptyStockView(s); return render(ctx, t2, k2); }
+      return showPrices(ctx, 0);
     }
 
     if (!(await debit(uid, jual))) {
