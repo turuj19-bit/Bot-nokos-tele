@@ -265,22 +265,27 @@ async function baselineIds(server, service) {
   if (r?.ok) baseCache.set(k, { at: Date.now(), ids });
   return ids;
 }
+const normCc = (c) => { const x = String(c || '').toLowerCase(); return x === 'gb' ? 'uk' : x; };   // uk & gb dianggap sama
 function foreignOnly(r, country, base, server) {
-  const cc = String(country).toLowerCase();
+  const cc = normCc(country);
   if (!r?.ok) return [];
-  if (r.country && String(r.country).toLowerCase() !== cc) return [];
+  if (r.country && normCc(r.country) !== cc) return [];
+  // Server khusus luar negeri (wa_luar) memang HANYA menjual nomor asing, jadi produknya tidak perlu
+  // dibandingkan dengan produk Indonesia (dulu perbandingan ini membuang SEMUA produk -> "belum tersedia").
+  // Pengaman nomor +62 tetap jalan saat order (phoneMatchesCountry), saldo otomatis kembali.
+  const dedicated = !!server && SERVERS_EX.includes(server);
   return (r.providers || []).filter((p) => {
     if (!(p.stock > 0)) return false;
-    // produk HARUS berasal dari server yang diminta (wa_luar). Produk server Ekonomi dll = nomor +62 -> dibuang
+    if (p.country && normCc(p.country) !== cc) return false;
+    const d = decId(p.id);
+    if (d && d.c && normCc(d.c) !== cc) return false;
+    if (dedicated) return true;
+    // server Indonesia (ekonomi/premium/khusus): produk wajib dari server itu & bukan salinan produk Indonesia
     if (server) {
       if (p.server && String(p.server) !== server) return false;
-      const dd = decId(p.id);
-      if (dd && (dd.s || dd.server) && String(dd.s || dd.server) !== server) return false;
+      if (d && (d.s || d.server) && String(d.s || d.server) !== server) return false;
     }
-    if (p.country && String(p.country).toLowerCase() !== cc) return false;
-    const d = decId(p.id);
-    if (d && d.c && String(d.c).toLowerCase() !== cc) return false;
-    return !base.has(sigOf(p));          // produk salinan Indonesia dibuang
+    return !base.has(sigOf(p));
   });
 }
 
