@@ -260,8 +260,14 @@ async function baselineIds(server, service) {
   const k = `${server}:${service}`;
   const c = baseCache.get(k);
   if (c && Date.now() - c.at < 10 * 60000) return c.ids;
-  const r = await bn('/prices', { query: { server, service, country: 'id' } });
-  const ids = new Set(r?.ok ? (r.providers || []).map(sigOf) : []);
+  const [r, canary] = await Promise.all([
+    bn('/prices', { query: { server, service, country: 'id' } }),
+    bn('/prices', { query: { server, service, country: 'aq' } }),   // negara tanpa nomor: apa pun yang dikembalikan = produk cadangan palsu
+  ]);
+  const ids = new Set([
+    ...(r?.ok ? (r.providers || []).map(sigOf) : []),
+    ...(canary?.ok ? (canary.providers || []).map(sigOf) : []),
+  ]);
   if (r?.ok) baseCache.set(k, { at: Date.now(), ids });
   return ids;
 }
@@ -301,9 +307,9 @@ function foreignOnly(r, country, base, server) {
 }
 
 
-/* Nomor luar negeri diambil dari 3 server pusat sekaligus (Ekonomi, Premium, Khusus) dan digabung jadi satu daftar harga.
+/* Nomor luar negeri diambil dari 3 server pusat sekaligus (Khusus, Ekonomi) dan digabung jadi satu daftar harga.
  * User tidak perlu memilih server. Tiap produk membawa server & kode layanan aslinya (_srv, _svc) untuk dipakai saat order. */
-const FOREIGN_BACKENDS = ['ekonomi', 'premium', 'khusus'];
+const FOREIGN_BACKENDS = ['khusus', 'ekonomi'];   // Premium TIDAK dipakai: terbukti memberi nomor +62 berlabel negara asing
 const normName = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 async function resolveCode(backend, code, name) {   // kode layanan di server lain dicari lewat nama (kode Khusus berupa angka)
   try {
@@ -1190,7 +1196,6 @@ bot.callbackQuery('ord', async (ctx) => {
   s.country = 'id'; s.filter = null; s.search = null;
   const kb = new InlineKeyboard()
     .text('🇮🇩 Nomor Indonesia', 'reg:id').row()
-    .text('🌍 Nomor Luar Negeri', 'reg:ex').row()
     .text('📜 Riwayat Order', 'hist:0').row()
     .text('⬅️ Kembali', 'home');
   await render(ctx, [
@@ -1198,8 +1203,7 @@ bot.callbackQuery('ord', async (ctx) => {
     'Pilih jenis nomor:', '',
     '🇮🇩 <b>Nomor Indonesia</b>',
     '└ OTP dengan nomor +62', '',
-    '🌍 <b>Nomor Luar Negeri</b>',
-    '└ Pilih negara yang tersedia', LINE,
+    LINE,
   ].join('\n'), kb);
 });
 
@@ -1226,7 +1230,9 @@ bot.callbackQuery('reg:id', async (ctx) => {
 });
 
 bot.callbackQuery('reg:ex', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery({ text: 'Nomor Luar Negeri sudah tidak tersedia.', show_alert: true });
+  return render(ctx, '🌍 <b>Nomor Luar Negeri sudah tidak tersedia</b>\n\nSilakan pakai Nomor Indonesia.', new InlineKeyboard().text('🛒 Buat Order', 'ord').row().text('🏠 Menu Utama', 'home'));
+  // eslint-disable-next-line no-unreachable
   const s = S(ctx.from.id);
   s.exServer = null; s.cfilter = null; s.filter = null; s.search = null; s.searchCountry = false;
   if (SERVERS_EX.length === 1) {   // hanya 1 server luar negeri -> langsung ke daftar negara
