@@ -212,11 +212,17 @@ function markBadCountry(server, cc) {     // negara yang terbukti memberi nomor 
   if (Array.isArray(negaraDb[server])) negaraDb[server] = negaraDb[server].filter((c) => c !== code);
   try { fs.writeFileSync(NEGARA_FILE, JSON.stringify(negaraDb)); } catch { /* abaikan */ }
 }
+// negara hanya tampil kalau awalan nomornya bisa dicek (supaya nomor yang masuk pasti sesuai negara)
+function canVerifyPhone(code) {
+  let cc = String(code).toUpperCase();
+  if (cc === 'UK') cc = 'GB';
+  return ['US', 'CA', 'RU', 'KZ'].includes(cc) || !!DIAL[cc];
+}
 function countryEntries(server) {
   const bad = negaraDb.bad?.[server] || [];
-  const base = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
-  // hasil pengecekan otomatis + semua negara dari daftar web pusat (tanpa duplikat)
-  let codes = [...new Set([...base, ...WEB_CODES].map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c));
+  // pakai daftar hasil pengecekan stok; sebelum pengecekan pertama selesai, pakai daftar web
+  const checked = Array.isArray(negaraDb[server]) && negaraDb[server].length ? negaraDb[server] : WEB_CODES;
+  let codes = [...new Set(checked.map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c) && canVerifyPhone(c));
   if (codes.includes('gb') && codes.includes('uk')) codes = codes.filter((c) => c !== 'uk');
   return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
 }
@@ -1042,7 +1048,7 @@ async function checkCenterBalance() {
     centerBalanceLastAlertAt = Date.now();
     await bot.api.sendMessage(ADMIN_ALERT_ID, [
       '🚨 <b>SALDO DIBANANA.ID HABIS</b>', LINE,
-      'Saldo website pusat terdeteksi <b>Rp 0</b>. Order baru bisa gagal sampai saldo pusat diisi kembali.',
+      'Saldo website terdeteksi <b>Rp 0</b>. Order baru bisa gagal sampai saldo diisi kembali.',
       '🔔 Notifikasi ini akan dikirim ulang setiap 10 menit sampai dihentikan.',
     ].join('\n'), { parse_mode: 'HTML', reply_markup: balanceAlertKb() });
   } catch (e) {
@@ -1059,7 +1065,7 @@ bot.callbackQuery('balancealert:stop', async (ctx) => {
   await ctx.answerCallbackQuery({ text: 'Notifikasi saldo dihentikan.' });
   try {
     await ctx.editMessageText([
-      '✅ <b>Notifikasi saldo pusat dihentikan</b>', LINE,
+      '✅ <b>Notifikasi saldo dihentikan</b>', LINE,
       centerBalanceLastValue === 0 ? 'Silakan isi saldo dibanana.id. Alarm akan aktif lagi setelah saldo terdeteksi terisi kembali.' : 'Alarm dinonaktifkan.',
     ].join('\n'), { parse_mode: 'HTML' });
   } catch {}
@@ -1178,7 +1184,7 @@ bot.callbackQuery('reg:ex', async (ctx) => {
   s.exServer = null; s.cfilter = null; s.filter = null; s.search = null; s.searchCountry = false;
   if (SERVERS_EX.length === 1) {   // hanya 1 server luar negeri -> langsung ke daftar negara
     s.exServer = SERVERS_EX[0];
-    return showCountries(ctx.chat.id, ctx.callbackQuery.message.message_id, ctx.from.id, 0);
+    return showCountries(ctx.chat.id, ctx.callbackQuery.message.message_id, ctx.from.id, s.cpage || 0);
   }
   const v = pickerView(true);
   await render(ctx, v.text, v.kb);
@@ -1194,11 +1200,12 @@ async function showCountries(chatId, msgId, uid, page) {
   const base = countryEntries(server);
   const head = `${SERVERS[server].label.split(' ')[0]} <b>Server ${SERVERS[server].name}</b>`;
   if (!base.length) {
-    return edit(chatId, msgId, `🌍 <b>Nomor Luar Negeri</b>\n${head}\n${LINE}\nBelum ada negara yang tersedia di server ini. Coba server lain.`,
+    return edit(chatId, msgId, `🌍 <b>Nomor Luar Negeri</b>\n${LINE}\nBelum ada negara yang tersedia di server ini. Coba server lain.`,
       new InlineKeyboard().text('⬅️ Kembali', EX_BACK));
   }
   const all = s.cfilter || base;
   const pg = paginate(all, page, PER_PAGE);
+  s.cpage = pg.page;   // ingat halaman daftar negara terakhir (reset saat /start)
   const kb = new InlineKeyboard().text('🔍 Cari Negara', 'ctq').row();
   pg.items.forEach((c, i) => {
     kb.text(clip(`${c[1]} ${c[2]}`, 24), `cty:${c[0]}`);
@@ -1210,7 +1217,7 @@ async function showCountries(chatId, msgId, uid, page) {
   kb.text('⬅️ Kembali', EX_BACK);
   const judul = s.cfilter ? `🔍 Hasil: <i>${esc(s.cfilterQ)}</i>` : 'Pilih negara:';
   const info = negaraRunning && !Array.isArray(negaraDb[server]) ? '\n<i>ℹ️ Daftar negara sedang diperbarui.</i>' : '';
-  await edit(chatId, msgId, [`🌍 <b>Nomor Luar Negeri</b>`, head, LINE, `${judul} (${pg.page + 1}/${pg.total})${info}`].join('\n'), kb);
+  await edit(chatId, msgId, [`🌍 <b>Nomor Luar Negeri</b>`, ...(SERVERS_EX.length > 1 ? [head] : []), LINE, `${judul} (${pg.page + 1}/${pg.total})${info}`].join('\n'), kb);
 }
 
 bot.callbackQuery(/^exs:(\w+)$/, async (ctx) => {
@@ -1230,7 +1237,7 @@ bot.callbackQuery('ctq', async (ctx) => {
   s.searchCountry = true; s.search = null;
   s.chatId = ctx.chat.id; s.msgId = ctx.callbackQuery.message.message_id;
   await render(ctx, '🔍 <b>Cari Negara</b>\n\nKetik nama negara yang kamu cari, contoh: <code>malaysia</code>',
-    new InlineKeyboard().text('⬅️ Batal', 'ctp:0'));
+    new InlineKeyboard().text('⬅️ Batal', `ctp:${s.cpage || 0}`));
 });
 
 bot.callbackQuery(/^cty:(\w+)$/, async (ctx) => {
@@ -1244,7 +1251,7 @@ bot.callbackQuery(/^cty:(\w+)$/, async (ctx) => {
 
 const isEx = (s) => !!s.country && s.country !== 'id';
 const svReopen = (s, server) => (isEx(s) ? `cty:${s.country}` : `srv:${server}`);   // buka ulang daftar layanan
-const svUp = (s) => (isEx(s) ? 'ctp:0' : 'reg:id');                                  // naik satu level
+const svUp = (s) => (isEx(s) ? `ctp:${s.cpage || 0}` : 'reg:id');                                  // naik satu level
 
 async function showServices(chatId, msgId, uid, server, page) {
   const s = S(uid);
@@ -1617,13 +1624,13 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     if (r.ok && (s.country || 'id') !== 'id' && !phoneMatchesCountry(r.phone_number, s.country)) {
       await credit(uid, jual);
       markBadCountry(s.server, s.country);
-      notifyAdmins(`🚨 Order pusat #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} BUKAN nomor negara itu. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
+      notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} BUKAN nomor negara itu. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
       cancelProviderOrder(r.order_id).catch(() => {});
-      return render(ctx, '⚠️ <b>Order dibatalkan otomatis</b>\n\nServer pusat memberi nomor yang bukan dari negara yang kamu pilih.\n\n💸 Saldo kamu tidak terpotong.',
+      return render(ctx, '⚠️ <b>Order gagal</b>\n\nNomor untuk negara ini sedang tidak tersedia, jadi order dibatalkan otomatis.\n\n💸 Saldo kamu tidak terpotong.',
         new InlineKeyboard().text('🌍 Pilih Negara Lain', 'reg:ex').row().text('🏠 Menu Utama', 'home'));
     }
     if (r.ok && (s.country || 'id') !== 'id' && r.country && String(r.country).toLowerCase() !== String(s.country).toLowerCase()) {
-      notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} tapi pusat memberi ${r.country} (${r.phone_number}). Cek API pusat!`);
+      notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} tapi yang diberikan ${r.country} (${r.phone_number}). Cek API dibanana.id!`);
     }
     if (r.ok && Number(r.price_idr) > p.price_idr) {
       notifyAdmins(`⚠️ Order #${r.order_id}: modal Rp${r.price_idr} lebih besar dari harga tampil Rp${p.price_idr}. Cek margin.`);
@@ -1666,7 +1673,7 @@ async function cancelProviderOrder(orderId) {
     if (['SMS_ALREADY_RECEIVED', 'CANNOT_CANCEL', 'ORDER_NOT_FOUND'].includes(c.error)) break;
     await sleep(15000);
   }
-  notifyAdmins(`⚠️ Order pusat #${orderId} (nomor salah negara) gagal dibatalkan otomatis. Batalkan manual di dibanana.id.`);
+  notifyAdmins(`⚠️ Order #${orderId} (nomor salah negara) gagal dibatalkan otomatis. Batalkan manual di dibanana.id.`);
   return false;
 }
 
@@ -1696,10 +1703,10 @@ bot.callbackQuery(/^cx:(\d+)$/, async (ctx) => {
   const r = await bn('/cancel', { method: 'POST', body: { order_id: o.provider_order_id } });
   if (!r.ok) {
     const msg = {
-      TOO_EARLY: '⏱ Server pusat belum mengizinkan pembatalan untuk order ini. Coba lagi sebentar.',
+      TOO_EARLY: '⏱ Order ini belum bisa dibatalkan. Coba lagi sebentar.',
       SMS_ALREADY_RECEIVED: 'OTP sudah masuk, order tidak bisa dibatalkan.',
       CANNOT_CANCEL: 'Order ini sudah tidak bisa dibatalkan (statusnya sudah berubah).',
-      ORDER_NOT_FOUND: 'Order tidak ditemukan di server pusat. Hubungi CS.',
+      ORDER_NOT_FOUND: 'Order tidak ditemukan. Hubungi CS.',
     }[r.error] || errText(r);
     return ctx.answerCallbackQuery({ text: msg, show_alert: true });
   }
@@ -1786,18 +1793,6 @@ async function resumePending() {
 }
 
 bot.api.setMyCommands([{ command: 'start', description: 'Buka menu utama' }]).catch(() => {});
-
-// Jumlah pengguna ditampilkan di profil bot (deskripsi singkat). Label "pengguna bulanan" bawaan Telegram diisi Telegram sendiri.
-let lastShortDesc = '';
-async function updateBotProfile() {
-  try {
-    const st = await getStats();
-    const desc = `Layanan nomor OTP instan & terpercaya. 👥 ${st.users.toLocaleString('id-ID')} pengguna terdaftar`;
-    if (desc === lastShortDesc) return;
-    await bot.api.setMyShortDescription(desc.slice(0, 120));
-    lastShortDesc = desc;
-  } catch (e) { console.error('update profil bot gagal:', e.message); }
-}
 process.once('SIGINT', () => bot.stop());
 process.once('SIGTERM', () => bot.stop());
 
@@ -1805,8 +1800,6 @@ bot.start({
   onStart: async (me) => {
     console.log(`✅ ${BRAND} berjalan sebagai @${me.username}`);
     await resumePending();
-    setTimeout(() => updateBotProfile(), 10000);
-    setInterval(() => updateBotProfile(), 30 * 60000).unref();                 // update angka pengguna di profil bot tiap 30 menit
     setInterval(() => sweepLateDeposits(), 3 * 60000).unref();               // kreditkan deposit yang dibayar telat
     setTimeout(() => checkCenterBalance(), 15000);                            // cek saldo pusat setelah bot siap
     setInterval(() => checkCenterBalance(), CENTER_BALANCE_CHECK_MS).unref(); // alarm saldo pusat tiap 10 menit saat habis
