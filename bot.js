@@ -265,6 +265,10 @@ async function baselineIds(server, service) {
   if (r?.ok) baseCache.set(k, { at: Date.now(), ids });
   return ids;
 }
+// Pusat dibanana.id melayani server "wa_luar" lewat produk berlabel "ekonomi" (id produk s:"ekonomi", c:<negara>).
+// Jadi untuk server luar negeri, label "ekonomi" dianggap sah. Keaslian negara tetap dijaga:
+// produk harus berlabel negara yang diminta + berbeda dari produk Indonesia + nomor hasil order dicek ulang (+62 ditolak).
+const serverOk = (got, want) => String(got) === String(want) || (SERVERS_EX.includes(want) && String(got) === 'ekonomi');
 const normCc = (c) => { const x = String(c || '').toLowerCase(); return x === 'gb' ? 'uk' : x; };   // uk & gb dianggap sama
 function foreignOnly(r, country, base, server) {
   const cc = normCc(country);
@@ -275,9 +279,9 @@ function foreignOnly(r, country, base, server) {
     // produk HARUS berasal dari server yang diminta (wa_luar). Kalau pusat membalas produk server Ekonomi dll
     // (id produk berisi s:"ekonomi") itu nomor +62 dengan label negara palsu -> dibuang
     if (server) {
-      if (p.server && String(p.server) !== server) return false;
+      if (p.server && !serverOk(p.server, server)) return false;
       const dd = decId(p.id);
-      if (dd && (dd.s || dd.server) && String(dd.s || dd.server) !== server) return false;
+      if (dd && (dd.s || dd.server) && !serverOk(dd.s || dd.server, server)) return false;
     }
     if (p.country && normCc(p.country) !== cc) return false;
     const d = decId(p.id);
@@ -1630,7 +1634,7 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     const r = await bn('/order', { method: 'POST', body: body(cur.id) });
     // PENGAMAN: minta negara luar tapi nomor yang diberikan pusat BUKAN nomor negara itu (mis. +62) ->
     // batalkan otomatis di pusat, saldo user dikembalikan, negara disembunyikan dari daftar.
-    if (r.ok && (s.country || 'id') !== 'id' && (!phoneMatchesCountry(r.phone_number, s.country) || (r.server && String(r.server) !== s.server))) {
+    if (r.ok && (s.country || 'id') !== 'id' && (!phoneMatchesCountry(r.phone_number, s.country) || (r.server && !serverOk(r.server, s.server)))) {
       await credit(uid, jual);
       markBadCountry(s.server, s.country);
       notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} BUKAN nomor negara itu. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
