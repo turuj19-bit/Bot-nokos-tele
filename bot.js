@@ -269,6 +269,15 @@ async function baselineIds(server, service) {
 // Jadi untuk server luar negeri, label "ekonomi" dianggap sah. Keaslian negara tetap dijaga:
 // produk harus berlabel negara yang diminta + berbeda dari produk Indonesia + nomor hasil order dicek ulang (+62 ditolak).
 const serverOk = (got, want) => String(got) === String(want) || (SERVERS_EX.includes(want) && String(got) === 'ekonomi');
+const fakeSigs = new Map();   // sidik produk (p|harga) yang terbukti memberi nomor salah negara -> waktu kedaluwarsa
+const FAKE_TTL_MS = 6 * 3600000;
+function markFakeProduct(p) { fakeSigs.set(sigOf(p), Date.now() + FAKE_TTL_MS); }
+function isFakeProduct(p) {
+  const k = sigOf(p), t = fakeSigs.get(k);
+  if (t && t > Date.now()) return true;
+  fakeSigs.delete(k);
+  return false;
+}
 const normCc = (c) => { const x = String(c || '').toLowerCase(); return x === 'gb' ? 'uk' : x; };   // uk & gb dianggap sama
 function foreignOnly(r, country, base, server) {
   const cc = normCc(country);
@@ -283,11 +292,40 @@ function foreignOnly(r, country, base, server) {
       const dd = decId(p.id);
       if (dd && (dd.s || dd.server) && !serverOk(dd.s || dd.server, server)) return false;
     }
+    if (isFakeProduct(p)) return false;   // produk yang sudah terbukti memberi nomor +62 berlabel negara asing
     if (p.country && normCc(p.country) !== cc) return false;
     const d = decId(p.id);
     if (d && d.c && normCc(d.c) !== cc) return false;
     return !base.has(sigOf(p));          // produk salinan Indonesia dibuang
   });
+}
+
+
+/* Nomor luar negeri diambil dari 3 server pusat sekaligus (Ekonomi, Premium, Khusus) dan digabung jadi satu daftar harga.
+ * User tidak perlu memilih server. Tiap produk membawa server & kode layanan aslinya (_srv, _svc) untuk dipakai saat order. */
+const FOREIGN_BACKENDS = ['ekonomi', 'premium', 'khusus'];
+const normName = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+async function resolveCode(backend, code, name) {   // kode layanan di server lain dicari lewat nama (kode Khusus berupa angka)
+  try {
+    const list = await getServices(backend);
+    const n = normName(name);
+    const hit = list.find((x) => normName(x.name) === n)
+      || list.find((x) => n && normName(x.name).startsWith(n.slice(0, 6)))
+      || list.find((x) => String(x.code) === String(code));
+    return hit ? String(hit.code) : null;
+  } catch { return null; }
+}
+async function foreignProviders(code, name, country) {
+  const parts = await Promise.all(FOREIGN_BACKENDS.map(async (srv) => {
+    try {
+      const svc = await resolveCode(srv, code, name);
+      if (!svc) return [];
+      const r = await bn('/prices', { query: { server: srv, service: svc, country } });
+      if (!r?.ok) return [];
+      return foreignOnly(r, country, await baselineIds(srv, svc), srv).map((p) => ({ ...p, _srv: srv, _svc: svc }));
+    } catch { return []; }
+  }));
+  return parts.flat();
 }
 
 async function hasStock(server, code, svcs, stat) {
@@ -1364,18 +1402,17 @@ async function loadPrices(ctx, server, code, operator) {
   await render(ctx, '⏳ Mengambil harga terbaru...');
   const country = s.country || 'id';
   const cInfo = countryInfo(country);
-  const query = { server, service: code, country };
-  const r = await bn('/prices', { query });
   const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
-  if (!r.ok) {
-    const netErr = ['NETWORK', 'SERVER_UNREACHABLE'].includes(r.error);
-    return render(ctx, `⚠️ ${cInfo && !netErr ? 'Layanan ini belum tersedia untuk negara / server tersebut.' : errText(r)}`, back);
+  let providers;
+  if (cInfo) {
+    providers = (await foreignProviders(code, name, country)).sort((a, b) => a.price_idr - b.price_idr);
+  } else {
+    const r = await bn('/prices', { query: { server, service: code, country } });
+    if (!r.ok) return render(ctx, `⚠️ ${errText(r)}`, back);
+    providers = (r.providers || []).filter((p) => p.stock > 0).sort((a, b) => a.price_idr - b.price_idr);
   }
-  // Negara asing: buang produk yang sebenarnya produk Indonesia (+62) supaya tidak salah beli.
-  const providers = (cInfo ? foreignOnly(r, country, await baselineIds(server, code), server) : (r.providers || []).filter((p) => p.stock > 0))
-    .sort((a, b) => a.price_idr - b.price_idr);
   if (cInfo && !providers.length) {
-    return render(ctx, `😔 <b>${esc(name)} belum tersedia untuk negara ini di server ${SERVERS[server].name}</b>\n\nCoba negara atau server lain.`, back);
+    return render(ctx, `😔 <b>${esc(name)} belum tersedia untuk negara ini</b>\n\nCoba negara lain atau kembali lagi nanti.`, back);
   }
   if (!providers.length) {
     return render(ctx, `😔 <b>Stok ${esc(name)} sedang kosong</b>\n\nCoba server lain atau kembali lagi nanti.`, back);
@@ -1608,11 +1645,12 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     // order ditolak dengan pesan "stok habis" (supaya kamu tidak rugi).
     const reload = new InlineKeyboard()
       .text('🔄 Muat Ulang Harga', `sv:${s.server}:${s.service}`).row().text('🏠 Menu Utama', 'home');
-    const fresh = await bn('/prices', { query: { server: s.server, service: s.service, country: s.country || 'id' } });
+    const srv = p._srv || s.server, svc = p._svc || s.service;   // server & kode layanan asli produk (negara asing bisa dari Ekonomi/Premium/Khusus)
+    const fresh = await bn('/prices', { query: { server: srv, service: svc, country: s.country || 'id' } });
     if (!fresh.ok) return render(ctx, `⚠️ ${errText(fresh)}`, reload);
     const buyCountry = s.country || 'id';
     const list = buyCountry !== 'id'
-      ? foreignOnly(fresh, buyCountry, await baselineIds(s.server, s.service), s.server)
+      ? foreignOnly(fresh, buyCountry, await baselineIds(srv, svc), srv)
       : (fresh.providers || []).filter((x) => x.stock > 0);
     // Wajib produk yang SAMA persis dengan yang dipilih (id sama, harga tidak naik).
     // Dulu ada cadangan "produk lain dengan harga sama" -> inilah yang membuat nomor acak.
@@ -1628,16 +1666,16 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     await render(ctx, '⏳ <b>Memproses order...</b>\nMohon tunggu sebentar.');
 
     const body = (id) => {
-      if (s.server === 'premium') return { id, operator: 'any' };   // operator tidak dipilih user (acak)
+      if (srv === 'premium') return { id, operator: 'any' };   // operator tidak dipilih user (acak)
       return { id };
     };
     const r = await bn('/order', { method: 'POST', body: body(cur.id) });
     // PENGAMAN: minta negara luar tapi nomor yang diberikan pusat BUKAN nomor negara itu (mis. +62) ->
     // batalkan otomatis di pusat, saldo user dikembalikan, negara disembunyikan dari daftar.
-    if (r.ok && (s.country || 'id') !== 'id' && (!phoneMatchesCountry(r.phone_number, s.country) || (r.server && !serverOk(r.server, s.server)))) {
+    if (r.ok && (s.country || 'id') !== 'id' && (!phoneMatchesCountry(r.phone_number, s.country) || (r.server && !serverOk(r.server, srv)))) {
       await credit(uid, jual);
-      markBadCountry(s.server, s.country);
-      notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} BUKAN nomor negara itu. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
+      markFakeProduct(cur);
+      notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} BUKAN nomor negara itu. Order dibatalkan otomatis, produk ini ditandai palsu (6 jam).`);
       notifyAdmins(`🔍 Jawaban order #${r.order_id}:\nproduk=${JSON.stringify(decId(cur.id))}\n${JSON.stringify(r).slice(0, 900)}`);
       cancelProviderOrder(r.order_id).catch(() => {});
       return render(ctx, '⚠️ <b>Order gagal</b>\n\nNomor untuk negara ini sedang tidak tersedia, jadi order dibatalkan otomatis.\n\n💸 Saldo kamu tidak terpotong.',
