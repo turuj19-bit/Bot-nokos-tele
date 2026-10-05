@@ -1316,9 +1316,9 @@ bot.callbackQuery(/^svs:(\w+)$/, async (ctx) => {
     new InlineKeyboard().text('⬅️ Batal', svReopen(s, ctx.match[1])));
 });
 
-bot.on('message:text', async (ctx) => {
+bot.on('message:text', async (ctx, next) => {
   const text = ctx.message.text.trim();
-  if (text.startsWith('/')) return;
+  if (text.startsWith('/')) return next();   // perintah (/cekapi, /addsaldo, dll) diteruskan ke handler command di bawah
   const s = S(ctx.from.id);
   if (s.searchCountry) {
     ctx.deleteMessage().catch(() => {});
