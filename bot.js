@@ -1,12 +1,12 @@
 /**
  * ============================================================
  *  PEDIA OTP — Bot Telegram Nokos / OTP (versi user)
- *  Stack : Node.js 22 + grammy + Supabase + API dibanana.id + VPay (QRIS)
+ *  Stack : Node.js 22 + grammy + Supabase + API dibanana.id + Paymenku (QRIS)
  * ============================================================
  *
  *  TOKEN / API KEY: dibaca dari file .env di VPS (dibuat otomatis oleh script install VPS).
- *    BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, VPAY_API_KEY
- *    opsional: VPAY_BASE_URL, ADMIN_IDS, QRIS_FEE_PERSEN
+ *    BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, PAYMENKU_API_KEY
+ *    opsional: PAYMENKU_BASE_URL, ADMIN_IDS, QRIS_FEE_PERSEN
  *    JANGAN tulis key asli di file ini / di GitHub.
  *
  *  TABEL SUPABASE TAMBAHAN (buat dulu sebelum menu Deposit dipakai):
@@ -18,7 +18,7 @@
  *      fee bigint not null default 0,
  *      total bigint not null,
  *      status text not null default 'pending',   -- pending | paid | expired | cancelled | failed
- *      -- invoice_id = ID transaksi VPay (pg_xxx)
+ *      -- invoice_id = trx_id transaksi Paymenku (IDPxxxx)
  *      chat_id bigint not null,
  *      message_id bigint,
  *      expired_at timestamptz,
@@ -40,12 +40,12 @@ const path = require('path');
 /* ============================ KONFIGURASI ============================ */
 // Token & API key TIDAK ditulis di file ini (supaya aman di GitHub). Semuanya dibaca dari file .env di VPS,
 // yang dibuat otomatis oleh script install VPS (bagian "ISI DI SINI").
-const { BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, VPAY_API_KEY } = process.env;
-const VPAY_BASE_URL = process.env.VPAY_BASE_URL || 'https://vitopediapay.com/api';
+const { BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, PAYMENKU_API_KEY } = process.env;
+const PAYMENKU_BASE_URL = process.env.PAYMENKU_BASE_URL || 'https://paymenku.com/api/v1';
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map((s) => Number(s.trim())).filter(Boolean);   // opsional, id Telegram admin dipisah koma
 const QRIS_FEE_PERSEN = Number(process.env.QRIS_FEE_PERSEN ?? 0.7);   // biaya QRIS dibebankan ke user (%)
 
-for (const [k, v] of Object.entries({ BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, VPAY_API_KEY })) {
+for (const [k, v] of Object.entries({ BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, PAYMENKU_API_KEY })) {
   if (!v) { console.error(`❌ .env belum lengkap: ${k} kosong`); process.exit(1); }
 }
 
@@ -384,24 +384,34 @@ function errText(r) {
   }
 }
 
-/* ============================== API VPAY (QRIS) ======================== */
-// Payment gateway: VPay (https://vitopediapay.com/api) — QRIS dinamis, cek status via polling.
-//   POST /pg/create {amount, ref_id}  -> data { id, amount, unique_code, total, qr_image(URL PNG), status }
-//   GET  /pg/check/:id                -> data { status: pending | paid | expired }
-// Total yang harus dibayar user = data.total (nominal + kode unik 0-100 dari VPay).
-const VPAY_URL = VPAY_BASE_URL.replace(/\/+$/, '');
+/* ============================== API PAYMENKU (QRIS) ======================== */
+// Payment gateway: Paymenku (https://paymenku.com/api/v1) — QRIS, cek status via polling.
+//   POST /transaction/create {channel_code:'qris', amount, reference_id, customer_name, customer_email, return_url}
+//        -> data { trx_id, amount (total bayar, sudah termasuk fee), status, pay_url, payment_info{ qr_url, qr_string, expiration_date } }
+//   GET  /check-status/:trx_id -> data { status: pending | paid | expired | failed | cancelled | refunded }
+// Total yang harus dibayar user = data.amount. Batas API Paymenku: 60 request/menit.
+const PAYMENKU_URL = PAYMENKU_BASE_URL.replace(/\/+$/, '');
+const PAYMENKU_CUSTOMER_EMAIL = 'deposit@pediaotp.com';   // Paymenku mewajibkan email pelanggan (format valid saja)
 
-async function vpayRequest(path, { method = 'GET', body } = {}) {
+async function paymenkuRequest(path, { method = 'GET', body, headers = {} } = {}, retried = false) {
   try {
-    const res = await fetch(VPAY_URL + path, {
+    const res = await fetch(PAYMENKU_URL + path, {
       method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${VPAY_API_KEY}` },
+      headers: {
+        'Content-Type': 'application/json', Accept: 'application/json',
+        Authorization: `Bearer ${PAYMENKU_API_KEY}`, ...headers,
+      },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15000),
     });
+    if (res.status === 429 && !retried) {   // kena rate limit: tunggu sesuai Retry-After lalu coba sekali lagi
+      const wait = Math.min(Math.max(Number(res.headers.get('Retry-After')) || 5, 1), 20);
+      await sleep(wait * 1000);
+      return paymenkuRequest(path, { method, body, headers }, true);
+    }
     let j; try { j = await res.json(); } catch { j = null; }
-    if (!res.ok || !j || j.success === false) {
-      return { ok: false, status: res.status, message: j?.message || j?.error || `VPay error (HTTP ${res.status})` };
+    if (!res.ok || !j || j.status !== 'success') {
+      return { ok: false, status: res.status, message: j?.message || `Paymenku error (HTTP ${res.status})` };
     }
     return { ok: true, data: j.data, raw: j };
   } catch (e) {
@@ -409,24 +419,32 @@ async function vpayRequest(path, { method = 'GET', body } = {}) {
   }
 }
 
-async function vpayCreateQris(uid, amount) {
+async function paymenkuCreateQris(uid, amount) {
   const refId = `DEPO-${uid}-${Date.now().toString(36).toUpperCase()}`.slice(0, 50);
-  const r = await vpayRequest('/pg/create', { method: 'POST', body: { amount, ref_id: refId } });
+  const r = await paymenkuRequest('/transaction/create', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': refId },
+    body: {
+      channel_code: 'qris', amount, reference_id: refId,
+      customer_name: `User ${uid}`, customer_email: PAYMENKU_CUSTOMER_EMAIL, return_url: CHANNEL_URL,
+    },
+  });
   if (!r.ok) return { ok: false, message: r.message };
   const d = r.data;
-  if (!d || !d.id || !d.qr_image) {
-    return { ok: false, message: 'Respons VPay tidak berisi id / qr_image: ' + JSON.stringify(r.raw).slice(0, 200) };
+  const qr = d?.payment_info?.qr_url;
+  if (!d || !d.trx_id || !qr) {
+    return { ok: false, message: 'Respons Paymenku tidak berisi trx_id / qr_url: ' + JSON.stringify(r.raw).slice(0, 200) };
   }
-  const total = Math.round(Number(d.total)) || (amount + Math.round(Number(d.unique_code) || 0));
-  return { ok: true, id: String(d.id), qrImage: String(d.qr_image), total };
+  const total = Math.round(Number(d.amount)) || amount;
+  return { ok: true, id: String(d.trx_id), qrImage: String(qr), total };
 }
 
-async function vpayCheckStatus(id) {
-  const r = await vpayRequest(`/pg/check/${encodeURIComponent(id)}`);
+async function paymenkuCheckStatus(id) {
+  const r = await paymenkuRequest(`/check-status/${encodeURIComponent(id)}`);
   if (!r.ok) return { ok: false };
   const raw = String(r.data?.status || '').toLowerCase();
   if (raw === 'paid') return { ok: true, status: 'paid' };
-  if (raw === 'expired') return { ok: true, status: 'expired' };
+  if (raw === 'expired' || raw === 'failed' || raw === 'cancelled') return { ok: true, status: 'expired' };
   return { ok: true, status: 'pending' };
 }
 
@@ -645,7 +663,7 @@ bot.callbackQuery('home', async (ctx) => {
 
 bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery());
 
-/* ============================ DEPOSIT (QRIS VPAY) ===================== */
+/* ============================ DEPOSIT (QRIS PAYMENKU) ===================== */
 const DEPOSIT_PRESETS = [1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
 const DEPOSIT_MIN = 1000;
 const DEPOSIT_MAX = 10000000;
@@ -699,7 +717,7 @@ bot.callbackQuery(/^depn:(\d+)$/, async (ctx) => {
   await startDeposit(ctx, Number(ctx.match[1]));
 });
 
-const DEPOSIT_TTL_MIN = 20;            // batas waktu bayar di bot (QRIS VPay aktif 24 jam; bayar telat tetap dikreditkan oleh penyapu di bawah)
+const DEPOSIT_TTL_MIN = 20;            // batas waktu bayar di bot (QRIS Paymenku aktif 24 jam; bayar telat tetap dikreditkan oleh penyapu di bawah)
 const cancelledDep = new Set();       // id deposit yang dibatalkan user -> polling berhenti
 
 function depositInvoiceText(row, status) {
@@ -741,12 +759,12 @@ function depositInvoiceText(row, status) {
 async function showDepositInvoice(ctx, row, qrImageUrl) {
   const kb = new InlineKeyboard().text('❌ Batalkan Pembayaran', `depx:${row.id}`).row().text('🏠 Menu Utama', 'home');
   const capt = depositInvoiceText(row, 'pending');
-  // QR dari VPay berupa URL gambar: diunduh dulu supaya Telegram pasti bisa menampilkannya.
+  // QR dari Paymenku berupa URL gambar: diunduh dulu supaya Telegram pasti bisa menampilkannya.
   let photo = qrImageUrl;
   try {
     const res = await fetch(qrImageUrl, { signal: AbortSignal.timeout(15000) });
     if (res.ok) photo = new InputFile(Buffer.from(await res.arrayBuffer()), 'qris.png');
-  } catch (e) { console.error('unduh QR VPay gagal, kirim lewat URL:', e.message); }
+  } catch (e) { console.error('unduh QR Paymenku gagal, kirim lewat URL:', e.message); }
   let m;
   try {
     m = await bot.api.sendPhoto(ctx.chat.id, photo, { caption: capt, parse_mode: 'HTML', reply_markup: kb });
@@ -772,13 +790,13 @@ async function startDeposit(ctx, nominal) {
       new InlineKeyboard().text('⬅️ Kembali', 'dep'));
   }
   await render(ctx, '⏳ <b>Membuat invoice QRIS...</b>\nMohon tunggu sebentar.');
-  const fee = Math.ceil((nominal * QRIS_FEE_PERSEN) / 100);
-  const inv = await vpayCreateQris(ctx.from.id, nominal + fee);   // VPay menambah kode unik -> inv.total
+  const inv = await paymenkuCreateQris(ctx.from.id, nominal);   // Paymenku menambah fee -> inv.total = total yang dibayar user
   if (!inv.ok) {
     console.error('deposit gagal dibuat:', inv.message);
     return render(ctx, '⚠️ <b>Gagal membuat invoice deposit</b>\n\nLayanan pembayaran sedang bermasalah. Coba lagi sebentar lagi.',
       new InlineKeyboard().text('🔄 Coba Lagi', `depn:${nominal}`).row().text('⬅️ Kembali', 'dep'));
   }
+  const fee = Math.max(0, inv.total - nominal);   // biaya QRIS asli dari Paymenku
   const expiredAt = new Date(Date.now() + DEPOSIT_TTL_MIN * 60000).toISOString();
   const { data: row, error } = await db.from('otp_deposits').insert({
     user_id: ctx.from.id, invoice_id: inv.id, nominal, fee, total: inv.total,
@@ -786,7 +804,7 @@ async function startDeposit(ctx, nominal) {
   }).select().single();
   if (error || !row) {
     console.error('insert deposit gagal', error?.code, error?.message, error?.details);
-    notifyAdmins(`🚨 Invoice VPay ${inv.id} (user ${ctx.from.id}, Rp${inv.total}) dibuat tapi gagal disimpan ke DB.\nPenyebab: ${error?.message || 'tidak ada data balik'}${error?.code ? ' [' + error.code + ']' : ''}\nJika user bayar, tambah saldo manual dengan /addsaldo.`);
+    notifyAdmins(`🚨 Invoice Paymenku ${inv.id} (user ${ctx.from.id}, Rp${inv.total}) dibuat tapi gagal disimpan ke DB.\nPenyebab: ${error?.message || 'tidak ada data balik'}${error?.code ? ' [' + error.code + ']' : ''}\nJika user bayar, tambah saldo manual dengan /addsaldo.`);
     return render(ctx, '⚠️ Terjadi gangguan saat menyimpan transaksi deposit. Hubungi admin.', homeBtn());
   }
   await showDepositInvoice(ctx, row, inv.qrImage);
@@ -857,13 +875,13 @@ async function watchDeposit(row) {
     while (Date.now() < deadline) {
       await sleep(POLL_MS);
       if (cancelledDep.has(row.id)) return;      // dibatalkan user (kalau tetap dibayar, penyapu yang mengkreditkan)
-      const st = await vpayCheckStatus(row.invoice_id);
+      const st = await paymenkuCheckStatus(row.invoice_id);
       if (!st.ok) continue;
       if (st.status === 'paid') { await settleDepositPaid(row, ['pending']); return; }
       if (st.status === 'expired') { await settleDepositEnd(row, 'expired'); return; }
     }
     // waktu habis: cek terakhir sebelum dinyatakan kedaluwarsa
-    const st = await vpayCheckStatus(row.invoice_id);
+    const st = await paymenkuCheckStatus(row.invoice_id);
     if (st.ok && st.status === 'paid') { await settleDepositPaid(row, ['pending']); return; }
     await settleDepositEnd(row, 'expired');
   } catch (e) {
@@ -875,7 +893,7 @@ async function watchDeposit(row) {
 }
 
 // Penyapu pembayaran telat: invoice yang sudah dibatalkan / kedaluwarsa di bot tapi ternyata
-// tetap dibayar user (QRIS VPay masih aktif 24 jam) tetap dikreditkan otomatis.
+// tetap dibayar user (QRIS Paymenku masih aktif 24 jam) tetap dikreditkan otomatis.
 let sweepN = 0;
 let sweeping = false;
 async function sweepLateDeposits() {
@@ -890,7 +908,7 @@ async function sweepLateDeposits() {
     for (const d of data || []) {
       const ageMin = (Date.now() - new Date(d.created_at).getTime()) / 60000;
       if (ageMin > 60 && sweepN % 10 !== 0) continue;      // invoice > 1 jam cukup dicek tiap ± 30 menit
-      const st = await vpayCheckStatus(d.invoice_id);
+      const st = await paymenkuCheckStatus(d.invoice_id);
       if (st.ok && st.status === 'paid') await settleDepositPaid(d, ['cancelled', 'expired'], true);
       await sleep(300);
     }
