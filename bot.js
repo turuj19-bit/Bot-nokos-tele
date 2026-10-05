@@ -42,7 +42,8 @@ const path = require('path');
 // yang dibuat otomatis oleh script install VPS (bagian "ISI DI SINI").
 const { BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, PAYMENKU_API_KEY } = process.env;
 const PAYMENKU_BASE_URL = process.env.PAYMENKU_BASE_URL || 'https://paymenku.com/api/v1';
-const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map((s) => Number(s.trim())).filter(Boolean);   // opsional, id Telegram admin dipisah koma
+const ADMIN_ALERT_ID = 7607446655; // notifikasi saldo pusat HANYA ke admin ini
+const ADMIN_IDS = [...new Set([...(process.env.ADMIN_IDS || '').split(',').map((s) => Number(s.trim())).filter(Boolean), ADMIN_ALERT_ID])];
 const QRIS_FEE_PERSEN = Number(process.env.QRIS_FEE_PERSEN ?? 0.7);   // biaya QRIS dibebankan ke user (%)
 
 for (const [k, v] of Object.entries({ BOT_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BANANA_API_KEY, PAYMENKU_API_KEY })) {
@@ -71,9 +72,10 @@ const SERVERS = {
   ekonomi: { label: '💰 Ekonomi', name: 'Ekonomi', desc: 'Stok banyak, harga murah' },
   premium: { label: '👑 Premium', name: 'Premium', desc: 'Stok banyak, harga bersaing, OTP rate sangat tinggi' },
   khusus:  { label: '⭐ Khusus',  name: 'Khusus',  desc: 'Stok sangat melimpah, harga murah, lengkap pilihan produknya' },
+  wa_luar: { label: '🌍 Luar Negeri', name: 'Luar Negeri', desc: 'Nomor internasional sesuai negara yang dipilih' },
 };
 const SERVERS_ID = ['ekonomi', 'premium', 'khusus'];              // menu Nomor Indonesia
-const SERVERS_EX = ['ekonomi', 'premium', 'khusus'];              // menu Nomor Luar Negeri
+const SERVERS_EX = ['wa_luar'];                                  // API pusat: server khusus nomor luar negeri
 
 /* ------------------------------------------------------------------
  *  DAFTAR NEGARA (otomatis)
@@ -212,9 +214,10 @@ function markBadCountry(server, cc) {     // negara yang terbukti memberi nomor 
 }
 function countryEntries(server) {
   const bad = negaraDb.bad?.[server] || [];
-  // HANYA negara yang ada di daftar web pusat (dibanana.id) -> jumlah & halaman sama persis dengan web.
-  // Negara tambahan hasil pengecekan otomatis TIDAK ditampilkan lagi.
-  const codes = [...new Set(WEB_CODES.map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c));
+  const base = Array.isArray(negaraDb[server]) ? negaraDb[server] : FALLBACK_CODES;
+  // hasil pengecekan otomatis + semua negara dari daftar web pusat (tanpa duplikat)
+  let codes = [...new Set([...base, ...WEB_CODES].map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c));
+  if (codes.includes('gb') && codes.includes('uk')) codes = codes.filter((c) => c !== 'uk');
   return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
 }
 
@@ -547,6 +550,50 @@ setInterval(() => {
 const lastMenu = new Map();   // uid -> message_id dashboard terakhir (supaya /start tidak menumpuk)
 const buying = new Set();     // kunci anti klik ganda saat membeli
 
+/* ========================= WAJIB JOIN CHANNEL ========================= */
+const CHANNEL_CHAT_ID = '@pediaotp';
+const memberCache = new Map();
+const MEMBER_CACHE_MS = 15000;
+
+async function isChannelMember(uid, force = false) {
+  const now = Date.now();
+  const cached = memberCache.get(uid);
+  if (!force && cached && now - cached.at < MEMBER_CACHE_MS) return cached.ok;
+  try {
+    const m = await bot.api.getChatMember(CHANNEL_CHAT_ID, uid);
+    const ok = ['creator', 'administrator', 'member'].includes(m.status) || (m.status === 'restricted' && m.is_member === true);
+    memberCache.set(uid, { at: now, ok });
+    return ok;
+  } catch (e) {
+    console.error('cek membership channel gagal:', e.message);
+    memberCache.delete(uid);
+    return null; // null = tidak bisa diverifikasi, jangan buka akses
+  }
+}
+
+function joinGateKeyboard() {
+  return new InlineKeyboard()
+    .url('📢 Join Channel Official', CHANNEL_URL).row()
+    .text('✅ Saya Sudah Join', 'joincheck');
+}
+
+async function showJoinGate(ctx, verifyFailed = false) {
+  const text = verifyFailed
+    ? '⚠️ <b>Verifikasi Channel Gagal</b>\n\nBot belum bisa memeriksa status membership kamu. Coba tekan <b>Saya Sudah Join</b> lagi beberapa saat lagi.'
+    : '🔒 <b>Akses Bot Terkunci</b>\n\nUntuk menggunakan <b>PEDIA OTP</b>, kamu wajib bergabung ke Channel Official terlebih dahulu.\n\nSetelah join, tekan <b>Saya Sudah Join</b>. Jika nanti kamu keluar channel, akses bot otomatis terkunci lagi.';
+  try {
+    if (ctx.callbackQuery?.message?.message_id) {
+      await bot.api.editMessageText(ctx.chat.id, ctx.callbackQuery.message.message_id, text, { parse_mode: 'HTML', reply_markup: joinGateKeyboard() });
+    } else {
+      await ctx.reply(text, { parse_mode: 'HTML', reply_markup: joinGateKeyboard() });
+    }
+  } catch (e) {
+    if (!String(e.description || e.message || '').includes('message is not modified')) {
+      ctx.reply(text, { parse_mode: 'HTML', reply_markup: joinGateKeyboard() }).catch(() => {});
+    }
+  }
+}
+
 /* ========================== RENDER / EDIT PESAN ====================== */
 async function edit(chatId, msgId, text, kb) {
   try {
@@ -614,6 +661,19 @@ async function dashboardText(u) {
 /* ============================== /START =============================== */
 bot.use(async (ctx, next) => {
   if (!ctx.from || ctx.chat?.type !== 'private') return;
+  const data = ctx.callbackQuery?.data || '';
+  const allowedBypass = data === 'joincheck' || data === 'balancealert:stop';
+  const joined = await isChannelMember(ctx.from.id, data === 'joincheck');
+  if (joined !== true && !allowedBypass) {
+    await showJoinGate(ctx, joined === null);
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: joined === null ? 'Verifikasi channel gagal.' : 'Wajib join channel resmi.', show_alert: joined === null });
+    return;
+  }
+  if (data === 'joincheck' && joined !== true) {
+    await showJoinGate(ctx, joined === null);
+    await ctx.answerCallbackQuery({ text: joined === null ? 'Verifikasi channel gagal.' : 'Kamu belum join channel resmi.', show_alert: joined === null });
+    return;
+  }
   const f = ctx.from;
   let u = await getUser(f.id);
   if (!u) {
@@ -650,6 +710,20 @@ bot.command('start', async (ctx) => {
   const m = await ctx.reply(await dashboardText(ctx.user), {
     parse_mode: 'HTML', reply_markup: mainKb(), link_preview_options: { is_disabled: true },
   });
+  lastMenu.set(ctx.from.id, m.message_id);
+});
+
+bot.callbackQuery('joincheck', async (ctx) => {
+  const joined = await isChannelMember(ctx.from.id, true);
+  if (joined !== true) {
+    await ctx.answerCallbackQuery({ text: joined === null ? 'Verifikasi channel gagal. Coba lagi.' : 'Kamu belum join channel resmi.', show_alert: joined === null });
+    return showJoinGate(ctx, joined === null);
+  }
+  await ctx.answerCallbackQuery({ text: 'Join terdeteksi. Akses dibuka.' });
+  sessions.delete(ctx.from.id);
+  const u = await getUser(ctx.from.id);
+  if (!u) return ctx.reply('⚠️ Terjadi gangguan database. Coba lagi sebentar lagi.');
+  const m = await bot.api.sendMessage(ctx.chat.id, await dashboardText(u), { parse_mode: 'HTML', reply_markup: mainKb(), link_preview_options: { is_disabled: true } });
   lastMenu.set(ctx.from.id, m.message_id);
 });
 
@@ -827,20 +901,30 @@ bot.callbackQuery(/^depx:(\d+)$/, async (ctx) => {
 async function editDepositMessage(row, status) {
   const text = depositInvoiceText(row, status);
   const kb = new InlineKeyboard().text('💰 Deposit Lagi', 'dep').row().text('🏠 Menu Utama', 'home');
-  if (status === 'cancelled' || status === 'expired' || status === 'failed') {
-    // QRIS tidak boleh tampil lagi: hapus pesan foto QR, lalu kirim pesan teks status biasa.
-    if (row.message_id) await bot.api.deleteMessage(row.chat_id, row.message_id).catch(() => {});
+
+  // Saat deposit selesai/dibatalkan/kedaluwarsa, QRIS FOTO harus hilang.
+  // Telegram tidak bisa mengubah media foto menjadi teks lewat edit caption, jadi
+  // pesan foto dihapus lalu dibuat ulang sebagai pesan teks biasa.
+  if (['paid', 'expired', 'cancelled', 'failed'].includes(status)) {
+    try { await bot.api.deleteMessage(row.chat_id, row.message_id); } catch (e) {
+      const d = String(e.description || e.message || '');
+      if (!d.includes('message to delete not found')) console.error('hapus QR deposit gagal:', d);
+    }
     try {
-      await bot.api.sendMessage(row.chat_id, text, { parse_mode: 'HTML', reply_markup: kb });
-      return;
-    } catch (e) { console.error('kirim status deposit gagal:', e.message); }
+      const m = await bot.api.sendMessage(row.chat_id, text, { parse_mode: 'HTML', reply_markup: kb, link_preview_options: { is_disabled: true } });
+      await db.from('otp_deposits').update({ message_id: m.message_id }).eq('id', row.id);
+      row.message_id = m.message_id;
+    } catch (e) {
+      console.error('kirim teks hasil deposit gagal:', e.message);
+    }
+    return;
   }
+
   try {
     await bot.api.editMessageCaption(row.chat_id, row.message_id, { caption: text, parse_mode: 'HTML', reply_markup: kb });
   } catch (e) {
     const d = String(e.description || e.message || '');
     if (d.includes('message is not modified')) return;
-    // Pesan aslinya teks biasa (bukan foto QR), coba edit sebagai teks
     try {
       await bot.api.editMessageText(row.chat_id, row.message_id, text, { parse_mode: 'HTML', reply_markup: kb });
     } catch (e2) {
@@ -859,9 +943,6 @@ async function settleDepositPaid(row, fromStatuses, late = false) {
   const ok = await credit(data.user_id, data.nominal);
   if (!ok) notifyAdmins(`🚨 Deposit ${data.invoice_id} user ${data.user_id} ${rp(data.nominal)} SUDAH DIBAYAR tapi gagal menambah saldo. Tambah manual: /addsaldo ${data.user_id} ${data.nominal}`);
   await editDepositMessage(data, 'paid');
-  if (late) {
-    bot.api.sendMessage(data.chat_id, `✅ Pembayaran deposit ${rp(data.nominal)} berhasil diterima. Saldo kamu sudah bertambah.`).catch(() => {});
-  }
   postMonitorDeposit(data).catch(() => {});
   return true;
 }
@@ -925,6 +1006,64 @@ async function sweepLateDeposits() {
     sweeping = false;
   }
 }
+
+/* ===================== ALERT SALDO DIBANANA.ID ====================== */
+let centerBalanceMuted = false;
+let centerBalanceLastAlertAt = 0;
+let centerBalanceLastValue = null;
+let centerBalanceChecking = false;
+const CENTER_BALANCE_CHECK_MS = 2 * 60000;
+const CENTER_BALANCE_ALERT_MS = 10 * 60000;
+
+function balanceAlertKb() {
+  return new InlineKeyboard().text('✅ Sudah Isi Saldo / Stop Notif', 'balancealert:stop');
+}
+
+async function checkCenterBalance() {
+  if (centerBalanceChecking) return;
+  centerBalanceChecking = true;
+  try {
+    const r = await bn('/balance');
+    if (!r?.ok) return; // gangguan API tidak dianggap saldo habis
+    const balance = Number(r.balance);
+    if (!Number.isFinite(balance)) return;
+    centerBalanceLastValue = balance;
+
+    if (balance > 0) {
+      // Setelah saldo terisi kembali, alarm di-arm lagi untuk kejadian berikutnya.
+      centerBalanceMuted = false;
+      centerBalanceLastAlertAt = 0;
+      return;
+    }
+
+    if (centerBalanceMuted) return;
+    if (Date.now() - centerBalanceLastAlertAt < CENTER_BALANCE_ALERT_MS) return;
+
+    centerBalanceLastAlertAt = Date.now();
+    await bot.api.sendMessage(ADMIN_ALERT_ID, [
+      '🚨 <b>SALDO DIBANANA.ID HABIS</b>', LINE,
+      'Saldo website pusat terdeteksi <b>Rp 0</b>. Order baru bisa gagal sampai saldo pusat diisi kembali.',
+      '🔔 Notifikasi ini akan dikirim ulang setiap 10 menit sampai dihentikan.',
+    ].join('\n'), { parse_mode: 'HTML', reply_markup: balanceAlertKb() });
+  } catch (e) {
+    console.error('cek saldo dibanana gagal:', e.message);
+  } finally {
+    centerBalanceChecking = false;
+  }
+}
+
+bot.callbackQuery('balancealert:stop', async (ctx) => {
+  if (ctx.from.id !== ADMIN_ALERT_ID) return ctx.answerCallbackQuery({ text: 'Tidak tersedia.', show_alert: true });
+  centerBalanceMuted = true;
+  centerBalanceLastAlertAt = Date.now();
+  await ctx.answerCallbackQuery({ text: 'Notifikasi saldo dihentikan.' });
+  try {
+    await ctx.editMessageText([
+      '✅ <b>Notifikasi saldo pusat dihentikan</b>', LINE,
+      centerBalanceLastValue === 0 ? 'Silakan isi saldo dibanana.id. Alarm akan aktif lagi setelah saldo terdeteksi terisi kembali.' : 'Alarm dinonaktifkan.',
+    ].join('\n'), { parse_mode: 'HTML' });
+  } catch {}
+});
 
 /* ============================== BANTUAN =============================== */
 
@@ -1226,24 +1365,6 @@ bot.callbackQuery(/^sv:(\w+):(.+)$/, async (ctx) => {
   await loadPrices(ctx, server, code);
 });
 
-// Ambil daftar harga terbaru dari pusat -> hanya produk yang stoknya benar-benar ready (stok > 0).
-// Mengembalikan null kalau pusat error (pakai daftar lama).
-async function freshProviders(s) {
-  try {
-    const country = s.country || 'id';
-    const r = await bn('/prices', { query: { server: s.server, service: s.service, country } });
-    if (!r?.ok) return null;
-    const list = country !== 'id'
-      ? foreignOnly(r, country, await baselineIds(s.server, s.service))
-      : (r.providers || []).filter((p) => p.stock > 0);
-    return list.filter((p) => p.stock > 0).sort((a, b) => a.price_idr - b.price_idr);
-  } catch { return null; }
-}
-function emptyStockView(s) {
-  return ['😔 <b>Stok ' + esc(s.serviceName || '') + ' sedang kosong</b>\n\nCoba server lain atau kembali lagi nanti.',
-    new InlineKeyboard().text('⬅️ Kembali', svReopen(s, s.server))];
-}
-
 async function showPrices(ctx, page) {
   const s = S(ctx.from.id);
   if (!s.providers) return expired(ctx);
@@ -1273,34 +1394,14 @@ const expired = (ctx) =>
 
 bot.callbackQuery(/^prp:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
-  const s = S(ctx.from.id);
-  if (s.providers) {
-    const fresh = await freshProviders(s);       // buang stok yang sudah habis dari daftar
-    if (fresh) {
-      if (!fresh.length) { const [t2, k2] = emptyStockView(s); return render(ctx, t2, k2); }
-      s.providers = fresh;
-    }
-  }
   await showPrices(ctx, Number(ctx.match[1]));
 });
 
 bot.callbackQuery(/^pr:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const s = S(ctx.from.id);
-  let p = s.providers?.[Number(ctx.match[1])];
+  const p = s.providers?.[Number(ctx.match[1])];
   if (!p) return expired(ctx);
-  // Cek ulang stok pilihan ini; kalau sudah habis, daftar diperbarui & pilihan itu hilang dari menu.
-  const fresh = await freshProviders(s);
-  if (fresh) {
-    const cur = fresh.find((x) => x.id === p.id && x.price_idr <= p.price_idr);
-    if (!cur) {
-      s.providers = fresh;
-      if (!fresh.length) { const [t2, k2] = emptyStockView(s); return render(ctx, t2, k2); }
-      return showPrices(ctx, 0);
-    }
-    p = cur;
-    s.providers[Number(ctx.match[1])] = cur;
-  }
   const [mk, u] = await Promise.all([getMarkup(), getUser(ctx.from.id)]);
   const jual = calcJual(p.price_idr, mk);
   const cukup = u.saldo >= jual;
@@ -1324,39 +1425,53 @@ const cancelRemaining = (o) => (o.created_at
 const fmtMS = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 const countdownMsgs = new Map();   // order.id -> { mid, stop } pesan yang sedang menampilkan hitung mundur
 
-const ICON = { pending: '⏳', resend_wait: '⏳', received: '✅', cancelled: '❌', expired: '⌛' };
+const ICON = { pending: '⏳', resend_wait: '⏳', received: '✅', cancelled: '❌', expired: '❌' };
 const STATUS_HEAD = {
-  pending: '⏳ <b>Menunggu OTP</b>',
-  resend_wait: '⏳ <b>Menunggu SMS ke-2</b>',
-  received: '✅ <b>OTP Diterima</b>',
-  cancelled: '❌ <b>Order Dibatalkan</b>',
-  expired: '⌛ <b>Order Kedaluwarsa</b>',
+  pending: '⏳ <b>MENUNGGU OTP</b>',
+  resend_wait: '⏳ <b>MENUNGGU SMS KE-2</b>',
+  received: '✅ <b>OTP DITERIMA</b>',
+  cancelled: '❌ <b>ORDER DIBATALKAN</b>',
+  expired: '❌ <b>ORDER KEDALUWARSA</b>',
 };
 
+function formatPhoneForDisplay(phone, country = 'id') {
+  const d = String(phone || '').replace(/\D/g, '');
+  if (!d) return String(phone || '-');
+  const cc = String(country || 'id').toLowerCase();
+  if (cc === 'id') {
+    if (d.startsWith('62')) return `+${d}`;
+    if (d.startsWith('0')) return `+62${d.slice(1)}`;
+    if (d.startsWith('8')) return `+62${d}`;
+  }
+  return `+${d}`;
+}
+
 function orderView(o) {
+  const country = o.country || (String(o.phone_number || '').startsWith('62') ? 'id' : '');
+  const nomor = formatPhoneForDisplay(o.phone_number, country);
   const t = [
-    STATUS_HEAD[o.status] || `<b>${esc(o.status)}</b>`, LINE,
-    `📱 LAYANAN : <b>${esc(UP(o.service_name || o.service_code))}</b>`,
-    `🖥 Server  : ${SERVERS[o.server]?.label || esc(o.server)}`,
-    `📞 Nomor   : <code>${esc(o.phone_number)}</code>`,
-    `💰 Harga   : ${rp(o.harga_jual)}`,
-    `🧾 Order   : #${o.id}`, LINE,
+    STATUS_HEAD[o.status] || `<b>${esc(UP(o.status))}</b>`, LINE,
+    `📱 <b>Layanan</b> : ${esc(UP(o.service_name || o.service_code))}`,
+    `🖥 <b>Server</b>   : ${SERVERS[o.server]?.label || esc(o.server)}`,
+    `📞 <b>Nomor</b>    : <code>${esc(nomor)}</code>`,
+    `💰 <b>Harga</b>    : ${rp(o.harga_jual)}`,
+    `🧾 <b>Order</b>    : #${o.id}`, LINE,
   ];
   const kb = new InlineKeyboard();
   if (o.status === 'pending') {
     const sisa = cancelRemaining(o);
-    t.push('Masukkan nomor di atas ke aplikasi tujuan. OTP akan muncul di sini otomatis.', '⏱ Berlaku ± 19 menit');
+    t.push('📲 Tempel nomor di atas ke aplikasi tujuan. OTP akan muncul otomatis di chat ini.', '⏱ <b>Berlaku ± 19 menit</b>');
     if (sisa > 0) {
-      t.push(`⏳ Pembatalan baru bisa dilakukan dalam ${fmtMS(sisa)}`);
-      kb.text(`⏳ Batal bisa dalam ${fmtMS(sisa)}`, `cxw:${o.id}`).row();
+      t.push(`⏳ Pembatalan tersedia dalam <b>${fmtMS(sisa)}</b>`);
+      kb.text(`⏳ Batal dalam ${fmtMS(sisa)}`, `cxw:${o.id}`).row();
     } else {
       kb.text('❌ Batalkan Order', `cx:${o.id}`).row();
     }
   } else if (o.status === 'resend_wait') {
-    t.push('SMS ke-2 sudah diminta. Mohon tunggu sebentar...');
+    t.push('📨 SMS ke-2 sudah diminta.', '⏳ Mohon tunggu OTP berikutnya...');
   } else if (o.status === 'received') {
-    t.push(`🔑 Kode OTP : <code>${esc(o.otp_code)}</code>`);
-    if (o.otp_code_2) t.push(`🔑 OTP ke-2 : <code>${esc(o.otp_code_2)}</code>`);
+    t.push(`🔑 <b>Kode OTP</b> : <code>${esc(o.otp_code)}</code>`);
+    if (o.otp_code_2) t.push(`🔑 <b>OTP ke-2</b> : <code>${esc(o.otp_code_2)}</code>`);
     if (o.full_sms) t.push(`💬 <i>${esc(o.full_sms)}</i>`);
     if (!o.resend_used) kb.text('🔁 Minta SMS ke-2 (gratis)', `rs:${o.id}`).row();
   } else {
@@ -1366,7 +1481,6 @@ function orderView(o) {
   return { text: t.join('\n'), kb };
 }
 
-// fresh=true -> kirim pesan baru (supaya user dapat notifikasi) & hapus pesan lama
 async function notifyOrder(o, fresh = false) {
   const { text, kb } = orderView(o);
   let mid = o.message_id;
@@ -1477,11 +1591,7 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     // Dulu ada cadangan "produk lain dengan harga sama" -> inilah yang membuat nomor acak.
     const cur = list.find((x) => x.id === p.id && x.price_idr <= p.price_idr);
     if (!cur) {
-      // Stok pilihan ini baru habis: perbarui daftar (yang habis dihapus) dan tampilkan lagi menu harga.
-      const rest = list.filter((x) => x.stock > 0).sort((a, b) => a.price_idr - b.price_idr);
-      s.providers = rest;
-      if (!rest.length) { const [t2, k2] = emptyStockView(s); return render(ctx, t2, k2); }
-      return showPrices(ctx, 0);
+      return render(ctx, '😔 <b>Stok sedang habis</b>\n\nStok atau harga pilihan ini baru saja berubah, jadi order dibatalkan sebelum saldo terpotong. Silakan muat ulang harga dan pilih lagi.', reload);
     }
 
     if (!(await debit(uid, jual))) {
@@ -1516,6 +1626,7 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
       console.error(`order gagal | server=${s.server} svc=${s.service} negara=${s.country || 'id'} operator=${s.operator || '-'} |`, JSON.stringify(r));
       if (['INSUFFICIENT_BALANCE', 'INVALID_API_KEY'].includes(r.error)) {
         notifyAdmins(`🚨 Order gagal: ${r.error}. Cek saldo / API key dibanana.id!`);
+        if (r.error === 'INSUFFICIENT_BALANCE') checkCenterBalance().catch(() => {});
       }
       return render(ctx, `⚠️ <b>Order gagal</b>\n\n${errText(r)}\n\n💸 Saldo kamu tidak terpotong.`,
         new InlineKeyboard().text('⬅️ Pilih Harga Lain', `prp:${s.pricePage || 0}`).row().text('🏠 Menu Utama', 'home'));
@@ -1523,7 +1634,7 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
 
     const { data: row, error } = await db.from('otp_orders').insert({
       user_id: uid, provider_order_id: r.order_id, service_code: s.service, service_name: s.serviceName,
-      server: s.server, phone_number: r.phone_number, harga_modal: r.price_idr ?? p.price_idr, harga_jual: jual,
+      server: s.server, phone_number: r.phone_number, country: (s.country || 'id').toLowerCase(), harga_modal: r.price_idr ?? p.price_idr, harga_jual: jual,
       status: 'pending', chat_id: ctx.chat.id, message_id: ctx.callbackQuery.message.message_id,
     }).select().single();
     if (error || !row) {
@@ -1676,6 +1787,8 @@ bot.start({
     console.log(`✅ ${BRAND} berjalan sebagai @${me.username}`);
     await resumePending();
     setInterval(() => sweepLateDeposits(), 3 * 60000).unref();               // kreditkan deposit yang dibayar telat
+    setTimeout(() => checkCenterBalance(), 15000);                            // cek saldo pusat setelah bot siap
+    setInterval(() => checkCenterBalance(), CENTER_BALANCE_CHECK_MS).unref(); // alarm saldo pusat tiap 10 menit saat habis
     setTimeout(() => refreshNegara(false), 20000);                           // cek daftar negara setelah bot siap
     setInterval(() => refreshNegara(false), 6 * 3600 * 1000).unref();        // dan diperiksa tiap 6 jam (diperbarui bila >24 jam)
   },
