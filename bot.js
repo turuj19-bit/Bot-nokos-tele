@@ -205,26 +205,22 @@ try {
 // hampir semua negara karena API mengembalikan produk Indonesia -> dibuang & dicek ulang otomatis.
 const NEGARA_VER = 3;
 if (negaraDb.v !== NEGARA_VER) negaraDb = {};
-function markBadCountry(server, cc) {     // negara yang terbukti memberi nomor +62 disembunyikan
-  const code = String(cc).toLowerCase();
-  negaraDb.bad = negaraDb.bad || {};
-  negaraDb.bad[server] = [...new Set([...(negaraDb.bad[server] || []), code])];
-  if (Array.isArray(negaraDb[server])) negaraDb[server] = negaraDb[server].filter((c) => c !== code);
-  try { fs.writeFileSync(NEGARA_FILE, JSON.stringify(negaraDb)); } catch { /* abaikan */ }
+const badUntil = new Map();   // "server:negara" -> waktu jeda berakhir
+const BAD_COOLDOWN_MS = 30 * 60000;
+function markBadCountry(server, cc) {     // negara yang baru saja memberi nomor salah dijeda 30 menit (daftar tetap lengkap)
+  badUntil.set(`${server}:${String(cc).toLowerCase()}`, Date.now() + BAD_COOLDOWN_MS);
 }
-// negara hanya tampil kalau awalan nomornya bisa dicek (supaya nomor yang masuk pasti sesuai negara)
-function canVerifyPhone(code) {
-  let cc = String(code).toUpperCase();
-  if (cc === 'UK') cc = 'GB';
-  return ['US', 'CA', 'RU', 'KZ'].includes(cc) || !!DIAL[cc];
+function isCountryPaused(server, cc) {
+  const k = `${server}:${String(cc).toLowerCase()}`;
+  const t = badUntil.get(k);
+  if (t && t > Date.now()) return true;
+  badUntil.delete(k);
+  return false;
 }
 function countryEntries(server) {
-  const bad = negaraDb.bad?.[server] || [];
-  // pakai daftar hasil pengecekan stok; sebelum pengecekan pertama selesai, pakai daftar web
-  const checked = Array.isArray(negaraDb[server]) && negaraDb[server].length ? negaraDb[server] : WEB_CODES;
-  let codes = [...new Set(checked.map((c) => String(c).toLowerCase()))].filter((c) => !bad.includes(c) && canVerifyPhone(c));
-  if (codes.includes('gb') && codes.includes('uk')) codes = codes.filter((c) => c !== 'uk');
-  return codes.map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
+  // daftar negara = persis daftar di web (tidak ada yang disembunyikan, supaya jumlah halaman selalu sama)
+  return [...new Set(WEB_CODES.map((c) => String(c).toLowerCase()))]
+    .map(countryInfo).filter(Boolean).sort((a, b) => a[2].localeCompare(b[2], 'id'));
 }
 
 const CAND = [...VALID_CC, 'UK'].filter((c) => c !== 'ID');   // 'UK' ikut dicek (sebagian API memakai kode uk)
@@ -269,12 +265,18 @@ async function baselineIds(server, service) {
   if (r?.ok) baseCache.set(k, { at: Date.now(), ids });
   return ids;
 }
-function foreignOnly(r, country, base) {
+function foreignOnly(r, country, base, server) {
   const cc = String(country).toLowerCase();
   if (!r?.ok) return [];
   if (r.country && String(r.country).toLowerCase() !== cc) return [];
   return (r.providers || []).filter((p) => {
     if (!(p.stock > 0)) return false;
+    // produk HARUS berasal dari server yang diminta (wa_luar). Produk server Ekonomi dll = nomor +62 -> dibuang
+    if (server) {
+      if (p.server && String(p.server) !== server) return false;
+      const dd = decId(p.id);
+      if (dd && (dd.s || dd.server) && String(dd.s || dd.server) !== server) return false;
+    }
     if (p.country && String(p.country).toLowerCase() !== cc) return false;
     const d = decId(p.id);
     if (d && d.c && String(d.c).toLowerCase() !== cc) return false;
@@ -294,7 +296,7 @@ async function hasStock(server, code, svcs, stat) {
     if (r && r.error !== 'NETWORK' && r.error !== 'BAD_RESPONSE') stat.answered++;
     if (r?.ok) {
       const base = await baselineIds(server, svc);
-      if (foreignOnly(r, code, base).length) return true;
+      if (foreignOnly(r, code, base, server).length) return true;
     }
     await sleep(200);
   }
@@ -304,7 +306,7 @@ async function refreshNegara(force = false) {
   if (negaraRunning) return false;
   if (!force && negaraDb.at && Date.now() - negaraDb.at < 24 * 3600 * 1000) return false;
   negaraRunning = true;
-  if (force) negaraDb.bad = {};          // /updatenegara = beri kesempatan baru semua negara
+  if (force) badUntil.clear();           // /updatenegara = beri kesempatan baru semua negara
   console.log('🌍 Memperbarui daftar negara dari dibanana.id...');
   try {
     for (const server of SERVERS_EX) {
@@ -320,7 +322,7 @@ async function refreshNegara(force = false) {
         }
       };
       await Promise.all(Array.from({ length: 3 }, worker));
-      let list = found.filter((c) => !(negaraDb.bad?.[server] || []).includes(c));
+      let list = found.slice();
       if (list.includes('gb') && list.includes('uk')) list = list.filter((c) => c !== 'uk');
       if (stat.answered < 50) { console.error(`   ${server}: API jarang menjawab, daftar lama dipertahankan`); continue; }
       negaraDb[server] = list.sort();
@@ -384,11 +386,12 @@ async function bn(path, { method = 'GET', query, body } = {}) {
 function errText(r) {
   // Kode & pesan asli dari pusat TIDAK ditampilkan ke user (hanya masuk log server).
   switch (r?.error) {
+    case 'INSUFFICIENT_BALANCE': return 'Stok nomor sedang tidak tersedia. Coba lagi beberapa saat lagi.';
     case 'NO_NUMBERS': return 'Stok nomor untuk pilihan ini sedang habis. Coba harga atau layanan lain.';
     case 'INVALID_PRODUCT_ID': return 'Harga berubah. Silakan pilih ulang.';
     case 'SERVER_UNREACHABLE':
     case 'NETWORK': return 'Server penyedia sedang tidak merespons. Coba lagi sebentar lagi.';
-    default: return 'Server penyedia sedang bermasalah. Coba lagi sebentar, atau pilih harga / layanan lain.';
+    default: return 'Layanan ini belum bisa diproses sekarang. Coba lagi sebentar, atau pilih harga / layanan lain.';
   }
 }
 
@@ -1245,6 +1248,10 @@ bot.callbackQuery(/^cty:(\w+)$/, async (ctx) => {
   const s = S(ctx.from.id);
   const chatId = ctx.chat.id, msgId = ctx.callbackQuery.message.message_id;
   if (!s.exServer) { const v = pickerView(true); return edit(chatId, msgId, v.text, v.kb); }
+  if (isCountryPaused(s.exServer, ctx.match[1])) {
+    return edit(chatId, msgId, '😔 <b>Negara ini sedang tidak tersedia</b>\n\nCoba negara lain, atau kembali lagi nanti.',
+      new InlineKeyboard().text('⬅️ Pilih Negara Lain', `ctp:${s.cpage || 0}`).row().text('🏠 Menu Utama', 'home'));
+  }
   s.country = ctx.match[1]; s.filter = null; s.search = null; s.searchCountry = false;
   await showServices(chatId, msgId, ctx.from.id, s.exServer, 0);
 });
@@ -1276,8 +1283,8 @@ async function showServices(chatId, msgId, uid, server, page) {
   const cInfo = countryInfo(s.country);
   const judul = s.filter && s.filterServer === server ? `🔍 HASIL: <i>${esc(s.filterQ)}</i>` : 'PILIH LAYANAN:';
   await edit(chatId, msgId, [
-    `${SERVERS[server].label.split(' ')[0]} <b>Server ${SERVERS[server].name}</b>`,
-    ...(cInfo ? [`🌍 Negara : ${cInfo[1]} ${esc(cInfo[2])}`] : []), LINE,
+    cInfo ? '🌍 <b>Nomor Luar Negeri</b>' : `${SERVERS[server].label.split(' ')[0]} <b>Server ${SERVERS[server].name}</b>`,
+    ...(cInfo ? [`Negara : ${cInfo[1]} ${esc(cInfo[2])}`] : []), LINE,
     `💰 Saldo : <b>${rp(u.saldo)}</b>`, LINE,
     `${judul} (${pg.page + 1}/${pg.total})`,
   ].join('\n'), kb);
@@ -1359,7 +1366,7 @@ async function loadPrices(ctx, server, code, operator) {
     return render(ctx, `⚠️ ${cInfo && !netErr ? 'Layanan ini belum tersedia untuk negara / server tersebut.' : errText(r)}`, back);
   }
   // Negara asing: buang produk yang sebenarnya produk Indonesia (+62) supaya tidak salah beli.
-  const providers = (cInfo ? foreignOnly(r, country, await baselineIds(server, code)) : (r.providers || []).filter((p) => p.stock > 0))
+  const providers = (cInfo ? foreignOnly(r, country, await baselineIds(server, code), server) : (r.providers || []).filter((p) => p.stock > 0))
     .sort((a, b) => a.price_idr - b.price_idr);
   if (cInfo && !providers.length) {
     return render(ctx, `😔 <b>${esc(name)} belum tersedia untuk negara ini di server ${SERVERS[server].name}</b>\n\nCoba negara atau server lain.`, back);
@@ -1599,7 +1606,7 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     if (!fresh.ok) return render(ctx, `⚠️ ${errText(fresh)}`, reload);
     const buyCountry = s.country || 'id';
     const list = buyCountry !== 'id'
-      ? foreignOnly(fresh, buyCountry, await baselineIds(s.server, s.service))
+      ? foreignOnly(fresh, buyCountry, await baselineIds(s.server, s.service), s.server)
       : (fresh.providers || []).filter((x) => x.stock > 0);
     // Wajib produk yang SAMA persis dengan yang dipilih (id sama, harga tidak naik).
     // Dulu ada cadangan "produk lain dengan harga sama" -> inilah yang membuat nomor acak.
@@ -1621,10 +1628,11 @@ bot.callbackQuery(/^buy:(\d+)$/, async (ctx) => {
     const r = await bn('/order', { method: 'POST', body: body(cur.id) });
     // PENGAMAN: minta negara luar tapi nomor yang diberikan pusat BUKAN nomor negara itu (mis. +62) ->
     // batalkan otomatis di pusat, saldo user dikembalikan, negara disembunyikan dari daftar.
-    if (r.ok && (s.country || 'id') !== 'id' && !phoneMatchesCountry(r.phone_number, s.country)) {
+    if (r.ok && (s.country || 'id') !== 'id' && (!phoneMatchesCountry(r.phone_number, s.country) || (r.server && String(r.server) !== s.server))) {
       await credit(uid, jual);
       markBadCountry(s.server, s.country);
       notifyAdmins(`🚨 Order #${r.order_id}: user minta negara ${s.country} (${s.server}) tapi nomor ${r.phone_number} BUKAN nomor negara itu. Order dibatalkan otomatis, negara disembunyikan dari daftar.`);
+      notifyAdmins(`🔍 Jawaban order #${r.order_id}:\nproduk=${JSON.stringify(decId(cur.id))}\n${JSON.stringify(r).slice(0, 900)}`);
       cancelProviderOrder(r.order_id).catch(() => {});
       return render(ctx, '⚠️ <b>Order gagal</b>\n\nNomor untuk negara ini sedang tidak tersedia, jadi order dibatalkan otomatis.\n\n💸 Saldo kamu tidak terpotong.',
         new InlineKeyboard().text('🌍 Pilih Negara Lain', 'reg:ex').row().text('🏠 Menu Utama', 'home'));
@@ -1766,6 +1774,18 @@ bot.command('updatenegara', async (ctx) => {
   refreshNegara(true).then((ok) => ctx.reply(ok
     ? `✅ Daftar negara diperbarui: Ekonomi ${negaraDb.ekonomi?.length ?? 0}, Premium ${negaraDb.premium?.length ?? 0}, Khusus ${negaraDb.khusus?.length ?? 0}.`
     : '⚠️ Gagal memperbarui daftar negara. Cek log PM2.')).catch(() => {});
+});
+
+// /cekapi <kode negara> <kode layanan>  -> tampilkan jawaban mentah API (hanya baca harga, TIDAK membeli)
+bot.command('cekapi', async (ctx) => {
+  if (!ADMIN_IDS.includes(ctx.from.id)) return;
+  const [cc, svc] = String(ctx.match || '').trim().toLowerCase().split(/\s+/);
+  if (!cc || !svc) return ctx.reply('Format: /cekapi <kode negara> <kode layanan>\nContoh: /cekapi cl wa');
+  const r = await bn('/prices', { query: { server: 'wa_luar', service: svc, country: cc } });
+  const base = await bn('/prices', { query: { server: 'wa_luar', service: svc, country: 'id' } });
+  const view = (x) => JSON.stringify({ ...x, providers: (x.providers || []).slice(0, 3).map((p) => ({ ...p, _id_terbaca: decId(p.id) })) }, null, 1).slice(0, 1700);
+  await ctx.reply(`negara=${cc} layanan=${svc}\n${view(r)}`);
+  await ctx.reply(`PEMBANDING negara=id\n${view(base)}`);
 });
 
 bot.command('addsaldo', async (ctx) => {
