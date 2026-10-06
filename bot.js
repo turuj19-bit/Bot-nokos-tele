@@ -277,12 +277,34 @@ function foreignOnly(r, country, base) {
     return !base.has(sigOf(p));          // salinan produk Indonesia / negara palsu dibuang
   });
 }
-// Harga + stok nomor luar negeri untuk satu layanan & negara, langsung dari server wa_luar.
-async function foreignProviders(code, country) {
-  const r = await bn('/prices', { query: { server: FOREIGN_SERVER, service: code, country } });
-  if (!r?.ok) return { ok: false, err: r, providers: [] };
-  const base = await baselineIds(FOREIGN_SERVER, code);
-  return { ok: true, providers: foreignOnly(r, country, base).map((p) => ({ ...p, _srv: FOREIGN_SERVER, _svc: code })) };
+// Harga + stok nomor luar negeri langsung dari server wa_luar (sama seperti web). Nomor hasil order tetap dicek awalannya.
+const FOREIGN_BACKENDS = ['wa_luar'];   // sama seperti web: Layanan Luar Negeri = satu server wa_luar
+const normName = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+async function resolveCode(backend, code, name) {
+  if (backend === FOREIGN_SERVER) return code;
+  try {
+    const list = await getServices(backend);
+    const n = normName(name);
+    const hit = list.find((x) => normName(x.name) === n);
+    return hit ? String(hit.code) : null;
+  } catch { return null; }
+}
+async function foreignProviders(code, name, country) {
+  let firstErr = null, anyOk = false;
+  const parts = await Promise.all(FOREIGN_BACKENDS.map(async (srv) => {
+    try {
+      const svc = await resolveCode(srv, code, name);
+      if (!svc) return [];
+      const r = await bn('/prices', { query: { server: srv, service: svc, country } });
+      if (!r?.ok) { firstErr = firstErr || r; return []; }
+      anyOk = true;
+      const base = await baselineIds(srv, svc);
+      return foreignOnly(r, country, base).map((p) => ({ ...p, _srv: srv, _svc: svc }));
+    } catch { return []; }
+  }));
+  const providers = parts.flat();
+  if (!anyOk) return { ok: false, err: firstErr, providers: [] };
+  return { ok: true, providers };
 }
 
 const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
@@ -1301,9 +1323,10 @@ async function loadPrices(ctx, server, code, operator) {
   const back = new InlineKeyboard().text('⬅️ Kembali', svReopen(s, server));
   let providers;
   if (cInfo) {
-    const fr = await foreignProviders(code, country);
+    const fr = await foreignProviders(code, name, country);
     if (!fr.ok) { console.error('harga luar negeri gagal', country, code, JSON.stringify(fr.err).slice(0, 300)); return render(ctx, `⚠️ ${errText(fr.err)}`, back); }
-    providers = fr.providers.sort((a, b) => a.price_idr - b.price_idr);
+    const eko = (x) => (String(x.server || decId(x.id)?.s || '') === 'ekonomi' ? 1 : 0);
+    providers = fr.providers.sort((a, b) => a.price_idr - b.price_idr || eko(a) - eko(b));
   } else {
     const r = await bn('/prices', { query: { server, service: code, country } });
     if (!r.ok) return render(ctx, `⚠️ ${errText(r)}`, back);
